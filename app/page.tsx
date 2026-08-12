@@ -103,6 +103,7 @@ interface AccountRecord {
   avatarCharacter: CharacterType;
   quantities: Record<string, number>; // 每款應援棒的背包庫存，key 是 skin id
   stats: UserStats;
+  friends?: string[]; // 已加的好友暱稱清單
 }
 
 const mockSkins: SkinData[] = [
@@ -740,6 +741,10 @@ function HomeScreen({
   onGoShop,
   onGoBackpack,
   onSearchFriend,
+  onViewFriend,
+  onAddFriend,
+  friends,
+  friendProfiles,
   skins,
 }: {
   user: UserData;
@@ -748,11 +753,17 @@ function HomeScreen({
   onGoShop: () => void;
   onGoBackpack: () => void;
   onSearchFriend: (nickname: string) => void;
+  onViewFriend: (nickname: string) => void;
+  onAddFriend: (nickname: string) => void;
+  friends: string[];
+  friendProfiles: Record<string, CharacterType | null>;
   skins: SkinData[];
 }) {
   const progress = (user.exp / user.expToNextLevel) * 100;
   const totalStickCount = skins.reduce((sum, s) => sum + s.quantity, 0);
   const [friendInput, setFriendInput] = useState('');
+  const [showAddFriend, setShowAddFriend] = useState(false);
+  const [addFriendInput, setAddFriendInput] = useState('');
 
   return (
     <div style={{ padding: `${spacing.md}px ${spacing.lg}px`, paddingBottom: 100 }}>
@@ -796,13 +807,116 @@ function HomeScreen({
         )}
       </div>
 
-      {/* 好友：輸入朋友的暱稱可以查看他的放空紀錄（大家共用同一份雲端資料，用暱稱找人） */}
-      <SectionHeader title="查看朋友的放空紀錄" />
+      {/* 我的好友：加過的朋友會顯示在這裡，點頭像可以直接看他的放空紀錄 */}
+      <SectionHeader title="我的好友" />
+      <div style={{ display: 'flex', gap: spacing.md, overflowX: 'auto', paddingBottom: spacing.xs, alignItems: 'flex-start' }}>
+        {friends.map((f) => {
+          const profileCharacter = friendProfiles[f];
+          return (
+            <button
+              key={f}
+              onClick={() => onViewFriend(f)}
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                width: 60,
+                flexShrink: 0,
+                background: 'none',
+                border: 'none',
+                cursor: 'pointer',
+                padding: 0,
+              }}
+            >
+              <AvatarBubble character={profileCharacter ?? 'cat'} status="online" size={52} />
+              <span
+                style={{
+                  fontSize: 12,
+                  color: colors.textPrimary,
+                  marginTop: 4,
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  maxWidth: 60,
+                }}
+              >
+                {f}
+              </span>
+            </button>
+          );
+        })}
+        <button
+          onClick={() => setShowAddFriend((v) => !v)}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            width: 52,
+            height: 52,
+            borderRadius: '50%',
+            background: colors.surfaceMuted,
+            border: `2px dashed ${colors.lavender}`,
+            color: colors.lavender,
+            fontSize: 24,
+            fontWeight: 700,
+            cursor: 'pointer',
+            flexShrink: 0,
+          }}
+        >
+          +
+        </button>
+      </div>
+      {friends.length === 0 && !showAddFriend && (
+        <div style={{ fontSize: 12, color: colors.textSecondary, marginTop: 4 }}>還沒有好友，點右邊的 + 新增一個</div>
+      )}
+
+      {showAddFriend && (
+        <div style={{ display: 'flex', gap: spacing.sm, marginTop: spacing.sm }}>
+          <input
+            value={addFriendInput}
+            onChange={(e) => setAddFriendInput(e.target.value)}
+            placeholder="輸入朋友的暱稱"
+            style={{
+              flex: 1,
+              padding: '10px 14px',
+              borderRadius: radius.input,
+              border: `1px solid ${colors.surfaceMuted}`,
+              fontSize: 14,
+              outline: 'none',
+            }}
+          />
+          <button
+            onClick={() => {
+              const name = addFriendInput.trim();
+              if (name) {
+                onAddFriend(name);
+                setAddFriendInput('');
+                setShowAddFriend(false);
+              }
+            }}
+            style={{
+              padding: `0 ${spacing.md}px`,
+              borderRadius: radius.pill,
+              border: 'none',
+              background: colors.lavender,
+              color: colors.textOnColor,
+              fontWeight: 600,
+              fontSize: 14,
+              cursor: 'pointer',
+            }}
+          >
+            加好友
+          </button>
+        </div>
+      )}
+
+      {/* 查找：輸入任何暱稱都能查看放空紀錄，不會自動加進好友清單 */}
+      <SectionHeader title="查看放空紀錄" />
       <div style={{ display: 'flex', gap: spacing.sm }}>
         <input
           value={friendInput}
           onChange={(e) => setFriendInput(e.target.value)}
-          placeholder="輸入朋友的暱稱"
+          placeholder="輸入暱稱"
           style={{
             flex: 1,
             padding: '10px 14px',
@@ -1461,11 +1575,15 @@ function StatsScreen({
   avatarCharacter,
   stats,
   onBack,
+  isFriend,
+  onToggleFriend,
 }: {
   nickname: string;
   avatarCharacter: CharacterType;
   stats: UserStats;
   onBack?: () => void;
+  isFriend?: boolean;
+  onToggleFriend?: () => void;
 }) {
   return (
     <div style={{ padding: `${spacing.md}px ${spacing.lg}px`, paddingBottom: 100, display: 'flex', flexDirection: 'column', gap: spacing.md }}>
@@ -1477,11 +1595,31 @@ function StatsScreen({
           ← 返回
         </button>
       )}
-      <div style={{ display: 'flex', alignItems: 'center', gap: spacing.sm }}>
-        {onBack && <AvatarBubble character={avatarCharacter} size={36} />}
-        <h1 style={{ fontSize: 24, fontWeight: 700, color: colors.textPrimary, margin: 0 }}>
-          {onBack ? `📊 ${nickname} 的放空紀錄` : '📊 我的放空紀錄'}
-        </h1>
+      <div style={{ display: 'flex', alignItems: 'center', gap: spacing.sm, justifyContent: 'space-between' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: spacing.sm }}>
+          {onBack && <AvatarBubble character={avatarCharacter} size={36} />}
+          <h1 style={{ fontSize: 24, fontWeight: 700, color: colors.textPrimary, margin: 0 }}>
+            {onBack ? `📊 ${nickname} 的放空紀錄` : '📊 我的放空紀錄'}
+          </h1>
+        </div>
+        {onBack && onToggleFriend && (
+          <button
+            onClick={onToggleFriend}
+            style={{
+              flexShrink: 0,
+              padding: '6px 12px',
+              borderRadius: radius.pill,
+              border: 'none',
+              fontSize: 12,
+              fontWeight: 600,
+              cursor: 'pointer',
+              background: isFriend ? colors.surfaceMuted : colors.lavender,
+              color: isFriend ? colors.textSecondary : colors.textOnColor,
+            }}
+          >
+            {isFriend ? '移除好友' : '+ 加好友'}
+          </button>
+        )}
       </div>
 
       {/* 肺部圖示：累積抽越多，肺會越黑 */}
@@ -1729,6 +1867,10 @@ export default function App() {
   const [friendRecord, setFriendRecord] = useState<{ nickname: string; avatarCharacter: CharacterType; stats: UserStats } | null>(null);
   const [friendError, setFriendError] = useState<string | null>(null);
 
+  // 已加的好友暱稱清單，以及每個好友的頭像快取（用來在首頁直接顯示頭像，不用每次都重新查）
+  const [friends, setFriends] = useState<string[]>([]);
+  const [friendProfiles, setFriendProfiles] = useState<Record<string, CharacterType | null>>({});
+
   // 應援棒的外觀是固定的，只有「這個帳號各款式的庫存數量」是動態的
   const skins: SkinData[] = mockSkins.map((s) => ({ ...s, quantity: quantities[s.id] ?? 0 }));
 
@@ -1754,10 +1896,12 @@ export default function App() {
           setAvatarCharacter(record.avatarCharacter);
           setQuantities(record.quantities);
           setMyStats(record.stats);
+          setFriends(record.friends ?? []);
         } else {
           setAvatarCharacter('cat');
           setQuantities(STARTER_QUANTITIES);
           setMyStats(STARTER_STATS);
+          setFriends([]);
         }
         setNickname(savedNickname);
         setAccountReady(true);
@@ -1765,13 +1909,13 @@ export default function App() {
     }
   }, []);
 
-  // 資料有變動（背包庫存、放空紀錄、頭像）就自動存回雲端資料庫，
+  // 資料有變動（背包庫存、放空紀錄、頭像、好友清單）就自動存回雲端資料庫，
   // 這樣其他人用你的暱稱查詢時，看到的才是最新的
   useEffect(() => {
     if (!nickname || !accountReady) return;
-    saveAccount(nickname, { avatarCharacter, quantities, stats: myStats });
+    saveAccount(nickname, { avatarCharacter, quantities, stats: myStats, friends });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [quantities, myStats, avatarCharacter, nickname, accountReady]);
+  }, [quantities, myStats, avatarCharacter, friends, nickname, accountReady]);
 
   // 輸入暱稱畫面按下「開始放空」：如果這個暱稱雲端已經有資料就直接讀取，沒有的話幫他建一個新帳號
   const handleCreateAccount = async (name: string, avatar: CharacterType) => {
@@ -1780,16 +1924,37 @@ export default function App() {
       setAvatarCharacter(existing.avatarCharacter);
       setQuantities(existing.quantities);
       setMyStats(existing.stats);
+      setFriends(existing.friends ?? []);
     } else {
       setAvatarCharacter(avatar);
       setQuantities(STARTER_QUANTITIES);
       setMyStats(STARTER_STATS);
-      await saveAccount(name, { avatarCharacter: avatar, quantities: STARTER_QUANTITIES, stats: STARTER_STATS });
+      setFriends([]);
+      await saveAccount(name, { avatarCharacter: avatar, quantities: STARTER_QUANTITIES, stats: STARTER_STATS, friends: [] });
     }
     window.localStorage.setItem('cloudpuff_nickname', name);
     setNickname(name);
     setAccountReady(true);
   };
+
+  // 好友清單有變動時，把還沒抓過頭像的好友抓一次資料，快取起來讓首頁能直接顯示頭像
+  useEffect(() => {
+    const missing = friends.filter((f) => !(f in friendProfiles));
+    if (missing.length === 0) return;
+    (async () => {
+      const results = await Promise.all(
+        missing.map(async (f) => {
+          const record = await fetchAccount(f);
+          return [f, record ? record.avatarCharacter : null] as const;
+        })
+      );
+      setFriendProfiles((prev) => {
+        const next = { ...prev };
+        for (const [name, avatar] of results) next[name] = avatar;
+        return next;
+      });
+    })();
+  }, [friends, friendProfiles]);
 
   const handleStartPuff = () => setScreen('puffroom');
 
@@ -1839,7 +2004,7 @@ export default function App() {
     setQuantities((prev) => ({ ...prev, [skinId]: (prev[skinId] ?? 0) + 20 }));
   };
 
-  // 輸入朋友暱稱查看他的放空紀錄：直接去共用的雲端資料庫用暱稱找
+  // 輸入朋友暱稱查看他的放空紀錄：直接去共用的雲端資料庫用暱稱找（點好友頭像也是走這個）
   const handleSearchFriend = async (searchName: string) => {
     setFriendError(null);
     const record = await fetchAccount(searchName);
@@ -1854,6 +2019,41 @@ export default function App() {
     setFriendRecord(null);
     setScreen('home');
     setActiveTab('home');
+  };
+
+  // 加好友：確認這個暱稱真的存在才加進清單，避免加到打錯字的名字
+  const handleAddFriend = async (name: string) => {
+    setFriendError(null);
+    if (name === nickname) {
+      setFriendError('不能把自己加成好友喔');
+      return;
+    }
+    if (friends.includes(name)) {
+      setFriendError(`「${name}」已經在好友清單裡了`);
+      return;
+    }
+    const record = await fetchAccount(name);
+    if (!record) {
+      setFriendError(`找不到暱稱「${name}」，對方可能還沒開始玩`);
+      return;
+    }
+    setFriends((prev) => [...prev, name]);
+    setFriendProfiles((prev) => ({ ...prev, [name]: record.avatarCharacter }));
+  };
+
+  const handleRemoveFriend = (name: string) => {
+    setFriends((prev) => prev.filter((f) => f !== name));
+  };
+
+  // 在好友的放空紀錄頁按「加好友／移除好友」
+  const handleToggleFriend = () => {
+    if (!friendRecord) return;
+    if (friends.includes(friendRecord.nickname)) {
+      handleRemoveFriend(friendRecord.nickname);
+    } else {
+      setFriends((prev) => [...prev, friendRecord.nickname]);
+      setFriendProfiles((prev) => ({ ...prev, [friendRecord.nickname]: friendRecord.avatarCharacter }));
+    }
   };
 
   // 還沒登入：先顯示輸入暱稱畫面
@@ -1890,6 +2090,10 @@ export default function App() {
           onGoShop={handleGoShop}
           onGoBackpack={handleGoBackpack}
           onSearchFriend={handleSearchFriend}
+          onViewFriend={handleSearchFriend}
+          onAddFriend={handleAddFriend}
+          friends={friends}
+          friendProfiles={friendProfiles}
           skins={skins}
         />
       )}
@@ -1902,6 +2106,8 @@ export default function App() {
           avatarCharacter={friendRecord.avatarCharacter}
           stats={friendRecord.stats}
           onBack={handleBackFromFriend}
+          isFriend={friends.includes(friendRecord.nickname)}
+          onToggleFriend={handleToggleFriend}
         />
       )}
       {screen === 'shop' && <ShopScreen skins={skins} onPurchase={handlePurchase} onBack={handleBackHome} />}
