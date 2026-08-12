@@ -22,7 +22,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 type CharacterType = 'panda' | 'cat' | 'fox' | 'rabbit';
 type OnlineStatus = 'online' | 'offline' | 'in_room';
 type CharacterState = 'idle' | 'inhale' | 'exhale' | 'relaxed';
-type ScreenName = 'home' | 'puffroom' | 'result' | 'collection' | 'stats' | 'shop' | 'friend' | 'backpack';
+type ScreenName = 'home' | 'puffroom' | 'result' | 'collection' | 'stats' | 'shop' | 'friend' | 'backpack' | 'goodkid';
 
 interface UserData {
   id: string;
@@ -104,6 +104,7 @@ interface AccountRecord {
   quantities: Record<string, number>; // 每款應援棒的背包庫存，key 是 skin id
   stats: UserStats;
   friends?: string[]; // 已加的好友暱稱清單
+  coins?: number; // 零錢包餘額（元），大家都從 0 元開始
 }
 
 const mockSkins: SkinData[] = [
@@ -112,7 +113,7 @@ const mockSkins: SkinData[] = [
     name: '奶茶白應援棒',
     rarity: 'common',
     quantity: 5,
-    price: 0,
+    price: 200,
     handleColor: colors.milkTea,
     handleStroke: '#D8BE95',
     bodyFill: '#FFFFFF',
@@ -126,7 +127,7 @@ const mockSkins: SkinData[] = [
     name: '粉紅應援棒',
     rarity: 'rare',
     quantity: 3,
-    price: 0,
+    price: 200,
     handleColor: '#2B2B33',
     handleStroke: '#1A1A20',
     bodyFill: '#FFB6D9',
@@ -140,7 +141,7 @@ const mockSkins: SkinData[] = [
     name: '彩虹應援棒',
     rarity: 'epic',
     quantity: 2,
-    price: 0,
+    price: 200,
     handleColor: '#2B2B33',
     handleStroke: '#1A1A20',
     bodyFill: '#FFD6E7',
@@ -154,7 +155,7 @@ const mockSkins: SkinData[] = [
     name: '極光應援棒',
     rarity: 'epic',
     quantity: 0,
-    price: 0,
+    price: 200,
     handleColor: '#2B2B33',
     handleStroke: '#1A1A20',
     bodyFill: '#CFF4D2',
@@ -168,7 +169,7 @@ const mockSkins: SkinData[] = [
     name: '星河應援棒',
     rarity: 'legendary',
     quantity: 0,
-    price: 0,
+    price: 200,
     handleColor: '#2B2B33',
     handleStroke: '#1A1A20',
     bodyFill: '#87CEEB',
@@ -189,6 +190,17 @@ const STARTER_STATS: UserStats = {
   totalRestCount: 0,
   history: [],
 };
+
+// 全新帳號一開始的零錢包餘額
+const STARTER_COINS = 0;
+
+// 商城買一款應援棒（20 隻）要花的錢
+const SHOP_PRICE = 200;
+
+// 小遊戲「我是好寶寶」：每撿一隻應援棒進桶子可以賺多少錢
+const GOOD_KID_COIN_PER_STICK = 1;
+// 遊戲場地上同時會有幾隻應援棒（撿走一隻就會馬上補一隻新的，等於無限生成）
+const GOOD_KID_STICK_COUNT = 6;
 
 /* ============================================================
    共用小元件（都定義在同一檔案內，不拆檔）
@@ -736,10 +748,12 @@ function usePuffRoom(onFinished: (durationSeconds: number) => void, started: boo
 
 function HomeScreen({
   user,
+  coins,
   onStartPuff,
   onGoCollection,
   onGoShop,
   onGoBackpack,
+  onGoGoodKid,
   onSearchFriend,
   onViewFriend,
   onAddFriend,
@@ -748,10 +762,12 @@ function HomeScreen({
   skins,
 }: {
   user: UserData;
+  coins: number;
   onStartPuff: () => void;
   onGoCollection: () => void;
   onGoShop: () => void;
   onGoBackpack: () => void;
+  onGoGoodKid: () => void;
   onSearchFriend: (nickname: string) => void;
   onViewFriend: (nickname: string) => void;
   onAddFriend: (nickname: string) => void;
@@ -797,6 +813,19 @@ function HomeScreen({
             <ProgressBar progress={progress} />
           </div>
         </div>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            marginTop: spacing.sm,
+            paddingTop: spacing.sm,
+            borderTop: `1px solid ${colors.surfaceMuted}`,
+          }}
+        >
+          <span style={{ fontSize: 14, fontWeight: 600, color: colors.textPrimary }}>🪙 零錢包</span>
+          <span style={{ fontSize: 16, fontWeight: 700, color: colors.textPrimary }}>{coins} 元</span>
+        </div>
       </Card>
 
       {/* 主 CTA：背包沒有應援棒的話，按下去改成先去商城兌換 */}
@@ -806,6 +835,34 @@ function HomeScreen({
           <div style={{ fontSize: 12, color: colors.textSecondary }}>背包沒有應援棒了，點一下前往商城兌換</div>
         )}
       </div>
+
+      {/* 小遊戲入口：把地上的應援棒撿進桶子賺零用錢 */}
+      <SectionHeader title="🧸 小遊戲" />
+      <button
+        onClick={onGoGoodKid}
+        style={{
+          width: '100%',
+          display: 'flex',
+          alignItems: 'center',
+          gap: spacing.md,
+          background: colors.surface,
+          borderRadius: radius.card,
+          padding: spacing.md,
+          boxShadow: cardShadow,
+          border: 'none',
+          cursor: 'pointer',
+          textAlign: 'left',
+        }}
+      >
+        <div style={{ fontSize: 32 }}>🧸</div>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 16, fontWeight: 600, color: colors.textPrimary }}>我是好寶寶</div>
+          <div style={{ fontSize: 12, color: colors.textSecondary, marginTop: 2 }}>
+            把地上的應援棒撿進桶子，每撿一隻賺 1 元
+          </div>
+        </div>
+        <div style={{ fontSize: 13, color: colors.lavender, fontWeight: 600 }}>開始 ›</div>
+      </button>
 
       {/* 我的好友：加過的朋友會顯示在這裡，點頭像可以直接看他的放空紀錄 */}
       <SectionHeader title="我的好友" />
@@ -1402,15 +1459,132 @@ function CollectionScreen({ skins }: { skins: SkinData[] }) {
 }
 
 /* ============================================================
-   畫面：商城 — 目前所有應援棒全面 0 元
+   小遊戲：我是好寶寶
+   地上散落著應援棒，點一下把它撿進桶子裡，每撿一隻零錢包 +1 元。
+   應援棒無限生成：撿走一隻，馬上會在別的地方冒出一隻新的。
+   ============================================================ */
+
+interface GroundStick {
+  id: number;
+  x: number; // 在遊戲區內的水平位置（百分比）
+  y: number; // 在遊戲區內的垂直位置（百分比）
+  collecting: boolean; // 是否正在飛向桶子的動畫中
+}
+
+function randomGroundStick(): GroundStick {
+  return {
+    id: Date.now() + Math.random(),
+    x: 10 + Math.random() * 78, // 10% ~ 88%
+    y: 8 + Math.random() * 55, // 8% ~ 63%，留空間給下面的桶子
+    collecting: false,
+  };
+}
+
+function GoodKidGameScreen({
+  coins,
+  onEarnCoin,
+  onExit,
+}: {
+  coins: number;
+  onEarnCoin: (amount: number) => void;
+  onExit: () => void;
+}) {
+  const [sticks, setSticks] = useState<GroundStick[]>(() =>
+    Array.from({ length: GOOD_KID_STICK_COUNT }).map(() => randomGroundStick())
+  );
+  const [collectedThisRound, setCollectedThisRound] = useState(0);
+
+  const handlePickStick = (id: number) => {
+    setSticks((prev) => prev.map((s) => (s.id === id ? { ...s, collecting: true } : s)));
+    onEarnCoin(GOOD_KID_COIN_PER_STICK);
+    setCollectedThisRound((c) => c + 1);
+    // 飛進桶子的動畫播完後，把這隻換成新的一隻（應援棒無限生成，不會撿完）
+    setTimeout(() => {
+      setSticks((prev) => [...prev.filter((s) => s.id !== id), randomGroundStick()]);
+    }, 320);
+  };
+
+  return (
+    <div
+      style={{
+        minHeight: '100vh',
+        background: `linear-gradient(180deg, ${colors.mintGreen}55, ${colors.background})`,
+        display: 'flex',
+        flexDirection: 'column',
+      }}
+    >
+      {/* 頂部列 */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: `${spacing.sm}px ${spacing.lg}px` }}>
+        <button onClick={onExit} style={{ background: 'none', border: 'none', fontSize: 16, color: colors.textPrimary, cursor: 'pointer' }}>
+          ← 離開遊戲
+        </button>
+        <span style={{ fontSize: 13, fontWeight: 600, color: colors.textPrimary }}>🪙 {coins} 元</span>
+      </div>
+
+      <div style={{ textAlign: 'center', padding: `0 ${spacing.lg}px` }}>
+        <h2 style={{ fontSize: 20, fontWeight: 700, color: colors.textPrimary, margin: '0 0 4px' }}>🧸 我是好寶寶</h2>
+        <div style={{ fontSize: 13, color: colors.textSecondary }}>
+          點地上的應援棒，把它撿進桶子裡，每撿一隻 +{GOOD_KID_COIN_PER_STICK} 元　本局已撿 {collectedThisRound} 隻
+        </div>
+      </div>
+
+      {/* 遊戲區：地上散落著應援棒，點了就會飛進畫面下方的桶子 */}
+      <div
+        style={{
+          position: 'relative',
+          flex: 1,
+          margin: `${spacing.md}px ${spacing.lg}px`,
+          borderRadius: radius.card,
+          background: colors.surface,
+          boxShadow: cardShadow,
+          overflow: 'hidden',
+          minHeight: 340,
+        }}
+      >
+        {sticks.map((s) => (
+          <button
+            key={s.id}
+            onClick={() => !s.collecting && handlePickStick(s.id)}
+            disabled={s.collecting}
+            style={{
+              position: 'absolute',
+              left: `${s.collecting ? 50 : s.x}%`,
+              top: `${s.collecting ? 92 : s.y}%`,
+              transform: 'translate(-50%, -50%)',
+              transition: 'left 0.3s ease, top 0.3s ease, opacity 0.3s ease',
+              opacity: s.collecting ? 0 : 1,
+              background: 'none',
+              border: 'none',
+              fontSize: 34,
+              cursor: s.collecting ? 'default' : 'pointer',
+              padding: 0,
+            }}
+          >
+            🪄
+          </button>
+        ))}
+
+        {/* 桶子：固定在遊戲區下方置中 */}
+        <div style={{ position: 'absolute', left: '50%', bottom: 8, transform: 'translateX(-50%)', fontSize: 48, pointerEvents: 'none' }}>
+          🪣
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   畫面：商城 — 每款應援棒 200 元／20 隻，用零錢包的錢購買
    ============================================================ */
 
 function ShopScreen({
   skins,
+  coins,
   onPurchase,
   onBack,
 }: {
   skins: SkinData[];
+  coins: number;
   onPurchase: (skinId: string) => void;
   onBack: () => void;
 }) {
@@ -1423,55 +1597,65 @@ function ShopScreen({
         ← 返回
       </button>
       <h1 style={{ fontSize: 24, fontWeight: 700, color: colors.textPrimary, marginBottom: spacing.xs }}>🛍️ 商城</h1>
-      <div style={{ fontSize: 13, color: colors.textSecondary, marginBottom: spacing.md }}>
-        限時開放，每次購買直接拿到 20 隻，會放進背包裡 ✨
+      <div style={{ fontSize: 13, color: colors.textSecondary, marginBottom: spacing.xs }}>
+        每次購買直接拿到 20 隻，會放進背包裡 ✨
+      </div>
+      <div style={{ fontSize: 14, fontWeight: 700, color: colors.textPrimary, marginBottom: spacing.md }}>
+        🪙 零錢包餘額：{coins} 元
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: spacing.md }}>
-        {skins.map((skin) => (
-          <div
-            key={skin.id}
-            style={{
-              background: colors.surface,
-              borderRadius: radius.card,
-              padding: spacing.md,
-              textAlign: 'center',
-              boxShadow: cardShadow,
-            }}
-          >
-            <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: 40 }}>
-              <CloudCandleStick
-                progress={100}
-                width={110}
-                height={32}
-                handleColor={skin.handleColor}
-                handleStroke={skin.handleStroke}
-                bodyFill={skin.bodyFill}
-                bodyStroke={skin.bodyStroke}
-                tipEmoji={skin.tipEmoji}
-              />
-            </div>
-            <div style={{ fontSize: 16, fontWeight: 600, color: colors.textPrimary, marginTop: 8 }}>{skin.name}</div>
-            <div style={{ fontSize: 14, fontWeight: 700, color: '#5FBF9F', marginTop: 4 }}>{skin.price} 元 / 20 隻</div>
-            <div style={{ fontSize: 12, color: colors.textSecondary, marginTop: 2 }}>背包目前 x{skin.quantity}</div>
-            <button
-              onClick={() => onPurchase(skin.id)}
+        {skins.map((skin) => {
+          const affordable = coins >= skin.price;
+          return (
+            <div
+              key={skin.id}
               style={{
-                marginTop: spacing.sm,
-                width: '100%',
-                padding: '8px 0',
-                borderRadius: radius.pill,
-                border: 'none',
-                cursor: 'pointer',
-                fontWeight: 600,
-                fontSize: 13,
-                background: colors.lavender,
-                color: colors.textOnColor,
+                background: colors.surface,
+                borderRadius: radius.card,
+                padding: spacing.md,
+                textAlign: 'center',
+                boxShadow: cardShadow,
               }}
             >
-              購買 +20
-            </button>
-          </div>
-        ))}
+              <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: 40 }}>
+                <CloudCandleStick
+                  progress={100}
+                  width={110}
+                  height={32}
+                  handleColor={skin.handleColor}
+                  handleStroke={skin.handleStroke}
+                  bodyFill={skin.bodyFill}
+                  bodyStroke={skin.bodyStroke}
+                  tipEmoji={skin.tipEmoji}
+                />
+              </div>
+              <div style={{ fontSize: 16, fontWeight: 600, color: colors.textPrimary, marginTop: 8 }}>{skin.name}</div>
+              <div style={{ fontSize: 14, fontWeight: 700, color: '#5FBF9F', marginTop: 4 }}>{skin.price} 元 / 20 隻</div>
+              <div style={{ fontSize: 12, color: colors.textSecondary, marginTop: 2 }}>背包目前 x{skin.quantity}</div>
+              <button
+                onClick={() => affordable && onPurchase(skin.id)}
+                disabled={!affordable}
+                style={{
+                  marginTop: spacing.sm,
+                  width: '100%',
+                  padding: '8px 0',
+                  borderRadius: radius.pill,
+                  border: 'none',
+                  cursor: affordable ? 'pointer' : 'default',
+                  fontWeight: 600,
+                  fontSize: 13,
+                  background: affordable ? colors.lavender : colors.surfaceMuted,
+                  color: affordable ? colors.textOnColor : colors.textSecondary,
+                }}
+              >
+                {affordable ? '購買 +20' : '餘額不足'}
+              </button>
+            </div>
+          );
+        })}
+      </div>
+      <div style={{ fontSize: 12, color: colors.textSecondary, marginTop: spacing.md, textAlign: 'center' }}>
+        沒錢了嗎？回首頁玩「🧸 我是好寶寶」小遊戲賺零用錢吧
       </div>
     </div>
   );
@@ -1863,9 +2047,10 @@ export default function App() {
   const [avatarCharacter, setAvatarCharacter] = useState<CharacterType>('cat');
   const [quantities, setQuantities] = useState<Record<string, number>>({});
   const [myStats, setMyStats] = useState<UserStats>(STARTER_STATS);
+  const [coins, setCoins] = useState<number>(STARTER_COINS);
 
   const [friendRecord, setFriendRecord] = useState<{ nickname: string; avatarCharacter: CharacterType; stats: UserStats } | null>(null);
-  const [friendError, setFriendError] = useState<string | null>(null);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   // 已加的好友暱稱清單，以及每個好友的頭像快取（用來在首頁直接顯示頭像，不用每次都重新查）
   const [friends, setFriends] = useState<string[]>([]);
@@ -1897,11 +2082,13 @@ export default function App() {
           setQuantities(record.quantities);
           setMyStats(record.stats);
           setFriends(record.friends ?? []);
+          setCoins(record.coins ?? STARTER_COINS);
         } else {
           setAvatarCharacter('cat');
           setQuantities(STARTER_QUANTITIES);
           setMyStats(STARTER_STATS);
           setFriends([]);
+          setCoins(STARTER_COINS);
         }
         setNickname(savedNickname);
         setAccountReady(true);
@@ -1909,13 +2096,13 @@ export default function App() {
     }
   }, []);
 
-  // 資料有變動（背包庫存、放空紀錄、頭像、好友清單）就自動存回雲端資料庫，
+  // 資料有變動（背包庫存、放空紀錄、頭像、好友清單、零錢包）就自動存回雲端資料庫，
   // 這樣其他人用你的暱稱查詢時，看到的才是最新的
   useEffect(() => {
     if (!nickname || !accountReady) return;
-    saveAccount(nickname, { avatarCharacter, quantities, stats: myStats, friends });
+    saveAccount(nickname, { avatarCharacter, quantities, stats: myStats, friends, coins });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [quantities, myStats, avatarCharacter, friends, nickname, accountReady]);
+  }, [quantities, myStats, avatarCharacter, friends, coins, nickname, accountReady]);
 
   // 輸入暱稱畫面按下「開始放空」：如果這個暱稱雲端已經有資料就直接讀取，沒有的話幫他建一個新帳號
   const handleCreateAccount = async (name: string, avatar: CharacterType) => {
@@ -1925,12 +2112,20 @@ export default function App() {
       setQuantities(existing.quantities);
       setMyStats(existing.stats);
       setFriends(existing.friends ?? []);
+      setCoins(existing.coins ?? STARTER_COINS);
     } else {
       setAvatarCharacter(avatar);
       setQuantities(STARTER_QUANTITIES);
       setMyStats(STARTER_STATS);
       setFriends([]);
-      await saveAccount(name, { avatarCharacter: avatar, quantities: STARTER_QUANTITIES, stats: STARTER_STATS, friends: [] });
+      setCoins(STARTER_COINS);
+      await saveAccount(name, {
+        avatarCharacter: avatar,
+        quantities: STARTER_QUANTITIES,
+        stats: STARTER_STATS,
+        friends: [],
+        coins: STARTER_COINS,
+      });
     }
     window.localStorage.setItem('cloudpuff_nickname', name);
     setNickname(name);
@@ -1999,20 +2194,30 @@ export default function App() {
   };
   const handleGoShop = () => setScreen('shop');
   const handleGoBackpack = () => setScreen('backpack');
-  // 商城每買一次，直接進 20 隻到背包
+  const handleGoGoodKid = () => setScreen('goodkid');
+  // 商城每買一次要花 SHOP_PRICE 元（用零錢包的錢付），成功的話直接進 20 隻到背包
   const handlePurchase = (skinId: string) => {
+    if (coins < SHOP_PRICE) {
+      setToastMessage('零錢包餘額不足，去玩「我是好寶寶」賺點錢吧');
+      return;
+    }
+    setCoins((prev) => prev - SHOP_PRICE);
     setQuantities((prev) => ({ ...prev, [skinId]: (prev[skinId] ?? 0) + 20 }));
+  };
+  // 小遊戲「我是好寶寶」每撿一隻應援棒，零錢包就 +amount 元
+  const handleEarnCoin = (amount: number) => {
+    setCoins((prev) => prev + amount);
   };
 
   // 輸入朋友暱稱查看他的放空紀錄：直接去共用的雲端資料庫用暱稱找（點好友頭像也是走這個）
   const handleSearchFriend = async (searchName: string) => {
-    setFriendError(null);
+    setToastMessage(null);
     const record = await fetchAccount(searchName);
     if (record) {
       setFriendRecord({ nickname: searchName, avatarCharacter: record.avatarCharacter, stats: record.stats });
       setScreen('friend');
     } else {
-      setFriendError(`找不到暱稱「${searchName}」的放空紀錄，對方可能還沒開始玩`);
+      setToastMessage(`找不到暱稱「${searchName}」的放空紀錄，對方可能還沒開始玩`);
     }
   };
   const handleBackFromFriend = () => {
@@ -2023,18 +2228,18 @@ export default function App() {
 
   // 加好友：確認這個暱稱真的存在才加進清單，避免加到打錯字的名字
   const handleAddFriend = async (name: string) => {
-    setFriendError(null);
+    setToastMessage(null);
     if (name === nickname) {
-      setFriendError('不能把自己加成好友喔');
+      setToastMessage('不能把自己加成好友喔');
       return;
     }
     if (friends.includes(name)) {
-      setFriendError(`「${name}」已經在好友清單裡了`);
+      setToastMessage(`「${name}」已經在好友清單裡了`);
       return;
     }
     const record = await fetchAccount(name);
     if (!record) {
-      setFriendError(`找不到暱稱「${name}」，對方可能還沒開始玩`);
+      setToastMessage(`找不到暱稱「${name}」，對方可能還沒開始玩`);
       return;
     }
     setFriends((prev) => [...prev, name]);
@@ -2085,10 +2290,12 @@ export default function App() {
       {screen === 'home' && (
         <HomeScreen
           user={displayUser}
+          coins={coins}
           onStartPuff={handleStartPuff}
           onGoCollection={() => handleTabChange('collection')}
           onGoShop={handleGoShop}
           onGoBackpack={handleGoBackpack}
+          onGoGoodKid={handleGoGoodKid}
           onSearchFriend={handleSearchFriend}
           onViewFriend={handleSearchFriend}
           onAddFriend={handleAddFriend}
@@ -2110,7 +2317,8 @@ export default function App() {
           onToggleFriend={handleToggleFriend}
         />
       )}
-      {screen === 'shop' && <ShopScreen skins={skins} onPurchase={handlePurchase} onBack={handleBackHome} />}
+      {screen === 'shop' && <ShopScreen skins={skins} coins={coins} onPurchase={handlePurchase} onBack={handleBackHome} />}
+      {screen === 'goodkid' && <GoodKidGameScreen coins={coins} onEarnCoin={handleEarnCoin} onExit={handleBackHome} />}
       {screen === 'puffroom' && (
         <PuffRoomScreen
           user={displayUser}
@@ -2126,7 +2334,7 @@ export default function App() {
         <BottomTabBar active={activeTab} onChange={handleTabChange} />
       )}
 
-      {friendError && (
+      {toastMessage && (
         <div
           style={{
             position: 'fixed',
@@ -2142,9 +2350,9 @@ export default function App() {
             textAlign: 'center',
             zIndex: 10,
           }}
-          onClick={() => setFriendError(null)}
+          onClick={() => setToastMessage(null)}
         >
-          {friendError}
+          {toastMessage}
         </div>
       )}
 
