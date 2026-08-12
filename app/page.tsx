@@ -753,8 +753,6 @@ function HomeScreen({
   onGoCollection,
   onGoShop,
   onGoBackpack,
-  onGoGoodKid,
-  onSearchFriend,
   onViewFriend,
   onAddFriend,
   friends,
@@ -767,8 +765,6 @@ function HomeScreen({
   onGoCollection: () => void;
   onGoShop: () => void;
   onGoBackpack: () => void;
-  onGoGoodKid: () => void;
-  onSearchFriend: (nickname: string) => void;
   onViewFriend: (nickname: string) => void;
   onAddFriend: (nickname: string) => void;
   friends: string[];
@@ -777,7 +773,6 @@ function HomeScreen({
 }) {
   const progress = (user.exp / user.expToNextLevel) * 100;
   const totalStickCount = skins.reduce((sum, s) => sum + s.quantity, 0);
-  const [friendInput, setFriendInput] = useState('');
   const [showAddFriend, setShowAddFriend] = useState(false);
   const [addFriendInput, setAddFriendInput] = useState('');
 
@@ -835,34 +830,6 @@ function HomeScreen({
           <div style={{ fontSize: 12, color: colors.textSecondary }}>背包沒有應援棒了，點一下前往商城兌換</div>
         )}
       </div>
-
-      {/* 小遊戲入口：把地上的應援棒撿進桶子賺零用錢 */}
-      <SectionHeader title="🧸 小遊戲" />
-      <button
-        onClick={onGoGoodKid}
-        style={{
-          width: '100%',
-          display: 'flex',
-          alignItems: 'center',
-          gap: spacing.md,
-          background: colors.surface,
-          borderRadius: radius.card,
-          padding: spacing.md,
-          boxShadow: cardShadow,
-          border: 'none',
-          cursor: 'pointer',
-          textAlign: 'left',
-        }}
-      >
-        <div style={{ fontSize: 32 }}>🧸</div>
-        <div style={{ flex: 1 }}>
-          <div style={{ fontSize: 16, fontWeight: 600, color: colors.textPrimary }}>我是好寶寶</div>
-          <div style={{ fontSize: 12, color: colors.textSecondary, marginTop: 2 }}>
-            把地上的應援棒撿進桶子，每撿一隻賺 1 元
-          </div>
-        </div>
-        <div style={{ fontSize: 13, color: colors.lavender, fontWeight: 600 }}>開始 ›</div>
-      </button>
 
       {/* 我的好友：加過的朋友會顯示在這裡，點頭像可以直接看他的放空紀錄 */}
       <SectionHeader title="我的好友" />
@@ -966,41 +933,6 @@ function HomeScreen({
           </button>
         </div>
       )}
-
-      {/* 查找：輸入任何暱稱都能查看放空紀錄，不會自動加進好友清單 */}
-      <SectionHeader title="查看放空紀錄" />
-      <div style={{ display: 'flex', gap: spacing.sm }}>
-        <input
-          value={friendInput}
-          onChange={(e) => setFriendInput(e.target.value)}
-          placeholder="輸入暱稱"
-          style={{
-            flex: 1,
-            padding: '10px 14px',
-            borderRadius: radius.input,
-            border: `1px solid ${colors.surfaceMuted}`,
-            fontSize: 14,
-            outline: 'none',
-          }}
-        />
-        <button
-          onClick={() => {
-            if (friendInput.trim()) onSearchFriend(friendInput.trim());
-          }}
-          style={{
-            padding: `0 ${spacing.md}px`,
-            borderRadius: radius.pill,
-            border: 'none',
-            background: colors.lavender,
-            color: colors.textOnColor,
-            fontWeight: 600,
-            fontSize: 14,
-            cursor: 'pointer',
-          }}
-        >
-          查看
-        </button>
-      </div>
 
       {/* 收藏預覽 */}
       <SectionHeader title="我的應援棒收藏" onPressMore={onGoCollection} />
@@ -1483,11 +1415,9 @@ function randomGroundStick(): GroundStick {
 function GoodKidGameScreen({
   coins,
   onEarnCoin,
-  onExit,
 }: {
   coins: number;
   onEarnCoin: (amount: number) => void;
-  onExit: () => void;
 }) {
   const [sticks, setSticks] = useState<GroundStick[]>(() =>
     Array.from({ length: GOOD_KID_STICK_COUNT }).map(() => randomGroundStick())
@@ -1511,13 +1441,11 @@ function GoodKidGameScreen({
         background: `linear-gradient(180deg, ${colors.mintGreen}55, ${colors.background})`,
         display: 'flex',
         flexDirection: 'column',
+        paddingBottom: 100,
       }}
     >
       {/* 頂部列 */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: `${spacing.sm}px ${spacing.lg}px` }}>
-        <button onClick={onExit} style={{ background: 'none', border: 'none', fontSize: 16, color: colors.textPrimary, cursor: 'pointer' }}>
-          ← 離開遊戲
-        </button>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', padding: `${spacing.sm}px ${spacing.lg}px` }}>
         <span style={{ fontSize: 13, fontWeight: 600, color: colors.textPrimary }}>🪙 {coins} 元</span>
       </div>
 
@@ -1864,11 +1792,18 @@ function StatsScreen({
    底部導覽列
    ============================================================ */
 
-function BottomTabBar({ active, onChange }: { active: 'home' | 'collection' | 'stats'; onChange: (tab: 'home' | 'collection' | 'stats') => void }) {
-  const tabs: { key: 'home' | 'collection' | 'stats'; label: string; icon: string }[] = [
+function BottomTabBar({
+  active,
+  onChange,
+}: {
+  active: 'home' | 'collection' | 'stats' | 'goodkid';
+  onChange: (tab: 'home' | 'collection' | 'stats' | 'goodkid') => void;
+}) {
+  const tabs: { key: 'home' | 'collection' | 'stats' | 'goodkid'; label: string; icon: string }[] = [
     { key: 'home', label: '首頁', icon: '🏠' },
     { key: 'collection', label: '收藏', icon: '☁️' },
     { key: 'stats', label: '統計', icon: '📊' },
+    { key: 'goodkid', label: '小遊戲', icon: '🧸' },
   ];
 
   return (
@@ -2038,7 +1973,7 @@ function NicknameScreen({ onConfirm }: { onConfirm: (nickname: string, avatarCha
 
 export default function App() {
   const [screen, setScreen] = useState<ScreenName>('home');
-  const [activeTab, setActiveTab] = useState<'home' | 'collection' | 'stats'>('home');
+  const [activeTab, setActiveTab] = useState<'home' | 'collection' | 'stats' | 'goodkid'>('home');
   const [lastDuration, setLastDuration] = useState(0);
 
   // 帳號狀態：nickname 為 null 代表還沒登入，先顯示輸入暱稱畫面
@@ -2188,13 +2123,12 @@ export default function App() {
     setScreen('home');
     setActiveTab('home');
   };
-  const handleTabChange = (tab: 'home' | 'collection' | 'stats') => {
+  const handleTabChange = (tab: 'home' | 'collection' | 'stats' | 'goodkid') => {
     setActiveTab(tab);
     setScreen(tab);
   };
   const handleGoShop = () => setScreen('shop');
   const handleGoBackpack = () => setScreen('backpack');
-  const handleGoGoodKid = () => setScreen('goodkid');
   // 商城每買一次要花 SHOP_PRICE 元（用零錢包的錢付），成功的話直接進 20 隻到背包
   const handlePurchase = (skinId: string) => {
     if (coins < SHOP_PRICE) {
@@ -2295,8 +2229,6 @@ export default function App() {
           onGoCollection={() => handleTabChange('collection')}
           onGoShop={handleGoShop}
           onGoBackpack={handleGoBackpack}
-          onGoGoodKid={handleGoGoodKid}
-          onSearchFriend={handleSearchFriend}
           onViewFriend={handleSearchFriend}
           onAddFriend={handleAddFriend}
           friends={friends}
@@ -2318,7 +2250,7 @@ export default function App() {
         />
       )}
       {screen === 'shop' && <ShopScreen skins={skins} coins={coins} onPurchase={handlePurchase} onBack={handleBackHome} />}
-      {screen === 'goodkid' && <GoodKidGameScreen coins={coins} onEarnCoin={handleEarnCoin} onExit={handleBackHome} />}
+      {screen === 'goodkid' && <GoodKidGameScreen coins={coins} onEarnCoin={handleEarnCoin} />}
       {screen === 'puffroom' && (
         <PuffRoomScreen
           user={displayUser}
@@ -2330,7 +2262,7 @@ export default function App() {
       )}
       {screen === 'result' && <ResultScreen durationSeconds={lastDuration} onReplay={handleReplay} onBackHome={handleBackHome} />}
 
-      {(screen === 'home' || screen === 'collection' || screen === 'stats') && (
+      {(screen === 'home' || screen === 'collection' || screen === 'stats' || screen === 'goodkid') && (
         <BottomTabBar active={activeTab} onChange={handleTabChange} />
       )}
 
