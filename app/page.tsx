@@ -22,7 +22,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 type CharacterType = 'panda' | 'cat' | 'fox' | 'rabbit';
 type OnlineStatus = 'online' | 'offline' | 'in_room';
 type CharacterState = 'idle' | 'inhale' | 'exhale' | 'relaxed';
-type ScreenName = 'home' | 'puffroom' | 'result' | 'collection' | 'stats' | 'shop' | 'friend' | 'backpack' | 'goodkid';
+type ScreenName = 'home' | 'puffroom' | 'result' | 'collection' | 'stats' | 'shop' | 'friend' | 'backpack' | 'goodkid' | 'leaderboard';
 
 interface UserData {
   id: string;
@@ -753,6 +753,7 @@ function HomeScreen({
   onGoCollection,
   onGoShop,
   onGoBackpack,
+  onGoLeaderboard,
   onViewFriend,
   onAddFriend,
   friends,
@@ -765,6 +766,7 @@ function HomeScreen({
   onGoCollection: () => void;
   onGoShop: () => void;
   onGoBackpack: () => void;
+  onGoLeaderboard: () => void;
   onViewFriend: (nickname: string) => void;
   onAddFriend: (nickname: string) => void;
   friends: string[];
@@ -787,6 +789,9 @@ function HomeScreen({
           </button>
           <button onClick={onGoShop} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 20, padding: 0 }}>
             🛍️
+          </button>
+          <button onClick={onGoLeaderboard} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 20, padding: 0 }}>
+            🏆
           </button>
           <span>🔔</span>
           <span>⚙️</span>
@@ -1452,7 +1457,7 @@ function GoodKidGameScreen({
       <div style={{ textAlign: 'center', padding: `0 ${spacing.lg}px` }}>
         <h2 style={{ fontSize: 20, fontWeight: 700, color: colors.textPrimary, margin: '0 0 4px' }}>🧸 我是好寶寶</h2>
         <div style={{ fontSize: 13, color: colors.textSecondary }}>
-          點地上的應援棒，把它撿進桶子裡，每撿一隻 +{GOOD_KID_COIN_PER_STICK} 元　本局已撿 {collectedThisRound} 隻
+          請學會把垃圾放進垃圾桶裡
         </div>
       </div>
 
@@ -1789,6 +1794,77 @@ function StatsScreen({
 }
 
 /* ============================================================
+   畫面：排行榜 — 看自己跟所有好友的累積休息次數，比誰抽最多
+   ============================================================ */
+
+interface LeaderboardEntry {
+  nickname: string;
+  avatarCharacter: CharacterType;
+  totalRestCount: number;
+  isMe: boolean;
+}
+
+const RANK_MEDAL: Record<number, string> = { 0: '🥇', 1: '🥈', 2: '🥉' };
+
+function LeaderboardScreen({
+  entries,
+  loading,
+  onBack,
+}: {
+  entries: LeaderboardEntry[];
+  loading: boolean;
+  onBack: () => void;
+}) {
+  const sorted = [...entries].sort((a, b) => b.totalRestCount - a.totalRestCount);
+
+  return (
+    <div style={{ padding: `${spacing.md}px ${spacing.lg}px`, paddingBottom: 100, display: 'flex', flexDirection: 'column', gap: spacing.md }}>
+      <button
+        onClick={onBack}
+        style={{ alignSelf: 'flex-start', background: 'none', border: 'none', fontSize: 15, color: colors.textSecondary, cursor: 'pointer', padding: 0 }}
+      >
+        ← 返回
+      </button>
+      <h1 style={{ fontSize: 24, fontWeight: 700, color: colors.textPrimary, margin: 0 }}>🏆 排行榜</h1>
+      <div style={{ fontSize: 13, color: colors.textSecondary, marginTop: -8 }}>比比看，你跟好友誰抽最多</div>
+
+      {loading && <div style={{ fontSize: 13, color: colors.textSecondary, textAlign: 'center', marginTop: spacing.xl }}>載入中…</div>}
+
+      {!loading && sorted.length === 0 && (
+        <div style={{ fontSize: 13, color: colors.textSecondary, textAlign: 'center', marginTop: spacing.xl }}>
+          還沒有資料，先去加幾個好友吧
+        </div>
+      )}
+
+      {!loading &&
+        sorted.map((entry, idx) => (
+          <Card
+            key={entry.nickname}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: spacing.md,
+              border: entry.isMe ? `2px solid ${colors.lavender}` : undefined,
+            }}
+          >
+            <div style={{ width: 28, textAlign: 'center', fontSize: idx < 3 ? 22 : 15, fontWeight: 700, color: colors.textSecondary }}>
+              {RANK_MEDAL[idx] ?? idx + 1}
+            </div>
+            <AvatarBubble character={entry.avatarCharacter} size={44} status="online" />
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 15, fontWeight: 600, color: colors.textPrimary }}>
+                {entry.nickname}
+                {entry.isMe && <span style={{ color: colors.lavender }}>（我）</span>}
+              </div>
+            </div>
+            <div style={{ fontSize: 16, fontWeight: 700, color: colors.textPrimary }}>{entry.totalRestCount} 次</div>
+          </Card>
+        ))}
+    </div>
+  );
+}
+
+/* ============================================================
    底部導覽列
    ============================================================ */
 
@@ -1991,6 +2067,10 @@ export default function App() {
   const [friends, setFriends] = useState<string[]>([]);
   const [friendProfiles, setFriendProfiles] = useState<Record<string, CharacterType | null>>({});
 
+  // 排行榜：自己 + 所有好友的累積休息次數，每次打開排行榜都重新抓一次最新的
+  const [leaderboardEntries, setLeaderboardEntries] = useState<LeaderboardEntry[]>([]);
+  const [leaderboardLoading, setLeaderboardLoading] = useState(false);
+
   // 應援棒的外觀是固定的，只有「這個帳號各款式的庫存數量」是動態的
   const skins: SkinData[] = mockSkins.map((s) => ({ ...s, quantity: quantities[s.id] ?? 0 }));
 
@@ -2129,6 +2209,27 @@ export default function App() {
   };
   const handleGoShop = () => setScreen('shop');
   const handleGoBackpack = () => setScreen('backpack');
+  // 打開排行榜：把自己跟所有好友的最新累積休息次數都抓一次
+  const handleGoLeaderboard = async () => {
+    setScreen('leaderboard');
+    setLeaderboardLoading(true);
+    const friendResults = await Promise.all(
+      friends.map(async (f) => {
+        const record = await fetchAccount(f);
+        return record
+          ? { nickname: f, avatarCharacter: record.avatarCharacter, totalRestCount: record.stats.totalRestCount, isMe: false }
+          : null;
+      })
+    );
+    const me: LeaderboardEntry = {
+      nickname: nickname ?? '',
+      avatarCharacter,
+      totalRestCount: myStats.totalRestCount,
+      isMe: true,
+    };
+    setLeaderboardEntries([me, ...friendResults.filter((e): e is LeaderboardEntry => e !== null)]);
+    setLeaderboardLoading(false);
+  };
   // 商城每買一次要花 SHOP_PRICE 元（用零錢包的錢付），成功的話直接進 20 隻到背包
   const handlePurchase = (skinId: string) => {
     if (coins < SHOP_PRICE) {
@@ -2229,6 +2330,7 @@ export default function App() {
           onGoCollection={() => handleTabChange('collection')}
           onGoShop={handleGoShop}
           onGoBackpack={handleGoBackpack}
+          onGoLeaderboard={handleGoLeaderboard}
           onViewFriend={handleSearchFriend}
           onAddFriend={handleAddFriend}
           friends={friends}
@@ -2251,6 +2353,9 @@ export default function App() {
       )}
       {screen === 'shop' && <ShopScreen skins={skins} coins={coins} onPurchase={handlePurchase} onBack={handleBackHome} />}
       {screen === 'goodkid' && <GoodKidGameScreen coins={coins} onEarnCoin={handleEarnCoin} />}
+      {screen === 'leaderboard' && (
+        <LeaderboardScreen entries={leaderboardEntries} loading={leaderboardLoading} onBack={handleBackHome} />
+      )}
       {screen === 'puffroom' && (
         <PuffRoomScreen
           user={displayUser}
