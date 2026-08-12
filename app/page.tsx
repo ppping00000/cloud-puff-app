@@ -3,10 +3,18 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 
 /* ============================================================
-   Cloud Puff ☁️ — Web 單檔元件版
+   Cloud Puff ☁️ — Web 單檔元件版（第二版）
    直接把這個檔案放到 Next.js 專案的 app/page.tsx（或任一 page）
    即可部署到 Vercel。全部邏輯、樣式、假資料都包在同一個檔案裡，
    使用 styled-jsx（Next.js 內建，免安裝）做動畫與樣式。
+
+   本版新增：
+   1. 放空紀錄頁加入「肺部圖示」（抽越多、肺越黑）
+      + 今日 / 本月 / 累積休息次數
+   2. 點好友頭像可以查看好友的完整放空紀錄
+   3. 開抽房：長按越久，放開後吐出的雲越多
+   4. 首頁新增「商城」，可購買應援棒（目前全面 0 元）
+   （放空紀錄 / 好友紀錄目前都是假資料，之後再串接真實資料）
    ============================================================ */
 
 /* ---------------------- 型別 ---------------------- */
@@ -14,7 +22,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 type CharacterType = 'panda' | 'cat' | 'fox' | 'rabbit';
 type OnlineStatus = 'online' | 'offline' | 'in_room';
 type CharacterState = 'idle' | 'inhale' | 'exhale' | 'relaxed';
-type ScreenName = 'home' | 'puffroom' | 'result' | 'collection' | 'stats';
+type ScreenName = 'home' | 'puffroom' | 'result' | 'collection' | 'stats' | 'shop' | 'friend' | 'backpack';
 
 interface UserData {
   id: string;
@@ -28,21 +36,34 @@ interface UserData {
   equippedSkin: string;
 }
 
-interface GroupData {
-  id: string;
-  name: string;
-  emoji: string;
-  onlineCount: number;
-  memberCount: number;
-}
-
 interface SkinData {
   id: string;
   name: string;
   rarity: 'common' | 'rare' | 'epic' | 'legendary';
-  unlocked: boolean;
-  unlockHint?: string;
-  cloudColor: string;
+  quantity: number; // 背包裡目前擁有幾隻（開抽一次會少一隻）
+  price: number; // 商城售價（目前全面 0 元），買一次會拿到 20 隻
+  handleColor: string; // 握把顏色
+  handleStroke: string; // 握把邊框顏色
+  bodyFill: string; // 棒身顏色
+  bodyStroke: string; // 棒身邊框顏色
+  tipEmoji: string; // 尖端微光符號
+  particleEmoji: string; // 吐出來的粒子符號
+  particleColor: string; // 粒子顏色（給非彩色符號用，emoji 本身通常固定色）
+}
+
+interface RestHistoryItem {
+  date: string;
+  withWho: string;
+  duration: string;
+}
+
+interface UserStats {
+  todayRestCount: number;
+  monthRestCount: number;
+  totalRestCount: number;
+  topPartnerId?: string;
+  topPartnerCount?: number;
+  history: RestHistoryItem[];
 }
 
 /* ---------------------- 設計系統 Tokens ---------------------- */
@@ -87,33 +108,115 @@ const mockCurrentUser: UserData = {
   expToNextLevel: 500,
   title: '放空大師',
   onlineStatus: 'online',
-  equippedSkin: 'grape_cloud',
+  equippedSkin: 'pink_stick',
 };
 
 const mockFriends: UserData[] = [
-  { id: 'uid_a', nickname: '小白', avatarCharacter: 'rabbit', level: 8, exp: 100, expToNextLevel: 300, title: '新手放空員', onlineStatus: 'online', equippedSkin: 'classic_white' },
-  { id: 'uid_b', nickname: '阿橘', avatarCharacter: 'fox', level: 15, exp: 220, expToNextLevel: 600, title: '陪伴達人', onlineStatus: 'online', equippedSkin: 'rainbow_cloud' },
-  { id: 'uid_c', nickname: '胖胖', avatarCharacter: 'panda', level: 5, exp: 50, expToNextLevel: 200, title: '雲朵新人', onlineStatus: 'offline', equippedSkin: 'classic_white' },
-];
-
-const mockGroups: GroupData[] = [
-  { id: 'group_1', name: '菸蟲2群', emoji: '☁️', onlineCount: 8, memberCount: 12 },
-  { id: 'group_2', name: '深夜放空俱樂部', emoji: '🌙', onlineCount: 3, memberCount: 20 },
+  { id: 'uid_a', nickname: '小白', avatarCharacter: 'rabbit', level: 8, exp: 100, expToNextLevel: 300, title: '新手放空員', onlineStatus: 'online', equippedSkin: 'milktea_white_stick' },
+  { id: 'uid_b', nickname: '阿橘', avatarCharacter: 'fox', level: 15, exp: 220, expToNextLevel: 600, title: '陪伴達人', onlineStatus: 'online', equippedSkin: 'rainbow_stick' },
+  { id: 'uid_c', nickname: '胖胖', avatarCharacter: 'panda', level: 5, exp: 50, expToNextLevel: 200, title: '雲朵新人', onlineStatus: 'offline', equippedSkin: 'milktea_white_stick' },
 ];
 
 const mockSkins: SkinData[] = [
-  { id: 'classic_white', name: '白雲 Classic', rarity: 'common', unlocked: true, cloudColor: '#FFFFFF' },
-  { id: 'grape_cloud', name: '葡萄雲', rarity: 'rare', unlocked: true, cloudColor: '#B8A6FF' },
-  { id: 'rainbow_cloud', name: '彩虹雲', rarity: 'epic', unlocked: true, cloudColor: '#FFD6E7' },
-  { id: 'aurora_cloud', name: '極光雲', rarity: 'epic', unlocked: false, unlockHint: '需達到 Lv.15', cloudColor: '#CFF4D2' },
-  { id: 'galaxy_cloud', name: '星河雲', rarity: 'legendary', unlocked: false, unlockHint: '連續登入 30 天', cloudColor: '#87CEEB' },
+  {
+    id: 'milktea_white_stick',
+    name: '奶茶白應援棒',
+    rarity: 'common',
+    quantity: 5,
+    price: 0,
+    handleColor: colors.milkTea,
+    handleStroke: '#D8BE95',
+    bodyFill: '#FFFFFF',
+    bodyStroke: '#E7E4F5',
+    tipEmoji: '☁️',
+    particleEmoji: '☁️',
+    particleColor: '#B8A6FF',
+  },
+  {
+    id: 'pink_stick',
+    name: '粉紅應援棒',
+    rarity: 'rare',
+    quantity: 3,
+    price: 0,
+    handleColor: '#2B2B33',
+    handleStroke: '#1A1A20',
+    bodyFill: '#FFB6D9',
+    bodyStroke: '#FF9FCB',
+    tipEmoji: '💗',
+    particleEmoji: '💗',
+    particleColor: '#FF8FC2',
+  },
+  {
+    id: 'rainbow_stick',
+    name: '彩虹應援棒',
+    rarity: 'epic',
+    quantity: 2,
+    price: 0,
+    handleColor: '#2B2B33',
+    handleStroke: '#1A1A20',
+    bodyFill: '#FFD6E7',
+    bodyStroke: '#B8A6FF',
+    tipEmoji: '🌈',
+    particleEmoji: '🌈',
+    particleColor: '#FFD6E7',
+  },
+  {
+    id: 'aurora_stick',
+    name: '極光應援棒',
+    rarity: 'epic',
+    quantity: 0,
+    price: 0,
+    handleColor: '#2B2B33',
+    handleStroke: '#1A1A20',
+    bodyFill: '#CFF4D2',
+    bodyStroke: '#87CEEB',
+    tipEmoji: '✨',
+    particleEmoji: '✨',
+    particleColor: '#CFF4D2',
+  },
+  {
+    id: 'galaxy_stick',
+    name: '星河應援棒',
+    rarity: 'legendary',
+    quantity: 0,
+    price: 0,
+    handleColor: '#2B2B33',
+    handleStroke: '#1A1A20',
+    bodyFill: '#87CEEB',
+    bodyStroke: '#B8A6FF',
+    tipEmoji: '⭐',
+    particleEmoji: '⭐',
+    particleColor: '#87CEEB',
+  },
 ];
 
-const mockHistory = [
-  { date: '8/12', withWho: '阿橘、小白', duration: '05:32' },
-  { date: '8/11', withWho: '雲朵群', duration: '12:10' },
-  { date: '8/10', withWho: '阿橘', duration: '03:45' },
-];
+// 每個使用者（自己 + 好友）的放空紀錄 — 全部歸零重新計算，之後靠真的開抽累積
+const mockStatsById: Record<string, UserStats> = {
+  uid_me: {
+    todayRestCount: 0,
+    monthRestCount: 0,
+    totalRestCount: 0,
+    history: [],
+  },
+  uid_a: {
+    todayRestCount: 0,
+    monthRestCount: 0,
+    totalRestCount: 0,
+    history: [],
+  },
+  uid_b: {
+    todayRestCount: 0,
+    monthRestCount: 0,
+    totalRestCount: 0,
+    history: [],
+  },
+  uid_c: {
+    todayRestCount: 0,
+    monthRestCount: 0,
+    totalRestCount: 0,
+    history: [],
+  },
+};
 
 /* ============================================================
    共用小元件（都定義在同一檔案內，不拆檔）
@@ -265,43 +368,75 @@ function CloudButton({
 
 interface CloudParticle {
   id: number;
-  left: number;
+  left: number; // 相對容器寬度的百分比位置
+  delay: number; // 動畫延遲，讓多朵雲飄出時錯開
+  drift: number; // 往上飄的距離
+  scale: number; // 大小差異
 }
 
-function CloudParticleLayer({ trigger, cloudColor }: { trigger: number; cloudColor: string }) {
+function CloudParticleLayer({
+  trigger,
+  count = 3,
+  particleColor,
+  particleEmoji = '☁️',
+  originXPercent = 50,
+}: {
+  trigger: number;
+  count?: number; // 這次要冒出幾朵雲（長按越久，數字越大）
+  particleColor: string;
+  particleEmoji?: string;
+  originXPercent?: number; // 冒出的起始位置（容器寬度的百分比），預設置中
+}) {
   const [particles, setParticles] = useState<CloudParticle[]>([]);
 
   useEffect(() => {
     if (trigger === 0) return;
-    const newOnes: CloudParticle[] = Array.from({ length: 3 }).map((_, i) => ({
-      id: Date.now() + i,
-      left: 40 + i * 60 + Math.random() * 20,
+    const n = Math.max(1, Math.min(18, Math.round(count)));
+    // 雲朵集中從同一個點（棒子尾巴附近）冒出，數量越多、扇形擴散越廣
+    const newOnes: CloudParticle[] = Array.from({ length: n }).map((_, i) => ({
+      id: Date.now() + i + Math.random(),
+      left: originXPercent + (Math.random() * 26 - 13),
+      delay: Math.random() * 0.28,
+      drift: 70 + Math.random() * 55,
+      scale: 0.8 + Math.random() * 0.55,
     }));
     setParticles((prev) => [...prev, ...newOnes]);
     const timer = setTimeout(() => {
-      setParticles((prev) => prev.filter((p) => !newOnes.find((n) => n.id === p.id)));
-    }, 1700);
+      setParticles((prev) => prev.filter((p) => !newOnes.find((n2) => n2.id === p.id)));
+    }, 2000);
     return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [trigger]);
 
   return (
-    <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 180, pointerEvents: 'none' }}>
+    <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
       {particles.map((p) => (
         <span
           key={p.id}
           className="drift-cloud"
-          style={{ position: 'absolute', top: 100, left: p.left, fontSize: 28, color: cloudColor }}
+          style={
+            {
+              position: 'absolute',
+              top: '85%',
+              left: `${p.left}%`,
+              fontSize: 22 * p.scale,
+              color: particleColor,
+              animationDelay: `${p.delay}s`,
+              '--drift-y': `-${p.drift}px`,
+            } as React.CSSProperties
+          }
         >
-          ☁️
+          {particleEmoji}
         </span>
       ))}
       <style jsx>{`
         .drift-cloud {
-          animation: drift 1.6s ease-out forwards;
+          transform: translate(-50%, -50%);
+          animation: drift 1.7s ease-out forwards;
         }
         @keyframes drift {
-          0% { transform: translateY(0); opacity: 1; }
-          100% { transform: translateY(-120px); opacity: 0; }
+          0% { transform: translate(-50%, -50%) translateY(0); opacity: 1; }
+          100% { transform: translate(-50%, -50%) translateY(var(--drift-y, -90px)); opacity: 0; }
         }
       `}</style>
     </div>
@@ -357,51 +492,337 @@ function CharacterAvatar({
 }
 
 /* ============================================================
-   陪抽房核心互動邏輯（自訂 Hook）
+   應援棒元件 — 用來取代寫實菸支的可愛道具（橫向版本）
+   握把（固定在左側，顏色可換）+ 棒身（隨 progress 由右往左變短，顏色可換）
+   尖端有微光符號取代火光（可換）；不含任何寫實香菸的視覺元素、不印文字。
    ============================================================ */
 
-function usePuffRoom(onFinished: (durationSeconds: number) => void) {
+function CloudCandleStick({
+  progress,
+  width = 220,
+  height = 64,
+  handleColor = '#2B2B33',
+  handleStroke = '#1A1A20',
+  bodyFill = '#FFB6D9',
+  bodyStroke = '#FF9FCB',
+  tipEmoji = '💗',
+}: {
+  progress: number;
+  width?: number;
+  height?: number;
+  handleColor?: string;
+  handleStroke?: string;
+  bodyFill?: string;
+  bodyStroke?: string;
+  tipEmoji?: string;
+}) {
+  const handleWidth = width * 0.22; // 握把固定寬度（在左側）
+  const bodyFullWidth = width - handleWidth; // 棒身滿格時的寬度
+  const clamped = Math.max(0, Math.min(100, progress));
+  const visibleBodyWidth = (bodyFullWidth * clamped) / 100;
+
+  const bodyBaseX = handleWidth; // 棒身左緣（跟握把交界，固定不動）
+  const bodyHeight = height * 0.5;
+  const bodyY = (height - bodyHeight) / 2;
+  const clipId = `stick-clip-h-${width}-${height}-${bodyFill.replace('#', '')}`;
+
+  return (
+    <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} style={{ overflow: 'visible' }}>
+      <defs>
+        <clipPath id={clipId}>
+          <rect
+            x={bodyBaseX}
+            y={0}
+            width={visibleBodyWidth}
+            height={height}
+            style={{ transition: 'width 0.6s ease' }}
+          />
+        </clipPath>
+      </defs>
+
+      {/* 棒身：單純膠囊柱狀 + 白色柔光帶，透過 clipPath 從右往左被「吃掉」 */}
+      <g clipPath={`url(#${clipId})`}>
+        <rect
+          x={bodyBaseX}
+          y={bodyY}
+          width={bodyFullWidth}
+          height={bodyHeight}
+          rx={bodyHeight / 2}
+          fill={bodyFill}
+          stroke={bodyStroke}
+          strokeWidth={1.5}
+        />
+        {/* 中央一條柔光帶，增加發光質感 */}
+        <rect
+          x={bodyBaseX}
+          y={bodyY + bodyHeight * 0.28}
+          width={bodyFullWidth}
+          height={bodyHeight * 0.2}
+          rx={bodyHeight * 0.1}
+          fill="#FFFFFF"
+          opacity={0.5}
+        />
+      </g>
+
+      {/* 握把：固定不變，代表「拿在手上的部分」 */}
+      <rect
+        x={0}
+        y={bodyY}
+        width={handleWidth}
+        height={bodyHeight}
+        rx={bodyHeight * 0.18}
+        fill={handleColor}
+        stroke={handleStroke}
+        strokeWidth={1.5}
+      />
+
+      {/* 尖端微光，取代火光，還沒燒完時才顯示，位置跟著右緣一起往左退 */}
+      {clamped > 0 && (
+        <text
+          x={Math.min(width - 6, bodyBaseX + visibleBodyWidth + 4)}
+          y={height / 2 + 5}
+          textAnchor="middle"
+          fontSize={16}
+          className="stick-sparkle"
+        >
+          {tipEmoji}
+        </text>
+      )}
+
+      <style jsx>{`
+        .stick-sparkle {
+          animation: sparkle-pulse 1.6s ease-in-out infinite;
+        }
+        @keyframes sparkle-pulse {
+          0%, 100% { opacity: 0.6; transform: scale(1); }
+          50% { opacity: 1; transform: scale(1.15); }
+        }
+      `}</style>
+    </svg>
+  );
+}
+
+/* ============================================================
+   應援棒選擇器 — 在陪抽房裡切換這次要用收藏裡的哪一隻
+   鎖定中的款式顯示灰階、不能點選。
+   ============================================================ */
+
+function SkinPicker({
+  skins,
+  selectedId,
+  onSelect,
+}: {
+  skins: SkinData[];
+  selectedId: string;
+  onSelect: (id: string) => void;
+}) {
+  return (
+    <div>
+      <div style={{ padding: `0 ${spacing.lg}px`, fontSize: 13, color: colors.textSecondary, marginBottom: 6 }}>
+        選擇應援棒
+      </div>
+      <div style={{ display: 'flex', gap: spacing.sm, overflowX: 'auto', padding: `0 ${spacing.lg}px`, paddingBottom: spacing.xs }}>
+        {skins.map((skin) => {
+          const isSelected = skin.id === selectedId;
+          const owned = skin.quantity > 0;
+          return (
+            <button
+              key={skin.id}
+              onClick={() => owned && onSelect(skin.id)}
+              disabled={!owned}
+              style={{
+                flexShrink: 0,
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                gap: 4,
+                background: isSelected ? colors.surfaceMuted : 'transparent',
+                border: isSelected ? `2px solid ${colors.lavender}` : '2px solid transparent',
+                borderRadius: radius.card - 8,
+                padding: spacing.xs,
+                cursor: owned ? 'pointer' : 'default',
+                opacity: owned ? 1 : 0.4,
+              }}
+            >
+              {owned ? (
+                <CloudCandleStick
+                  progress={100}
+                  width={70}
+                  height={22}
+                  handleColor={skin.handleColor}
+                  handleStroke={skin.handleStroke}
+                  bodyFill={skin.bodyFill}
+                  bodyStroke={skin.bodyStroke}
+                  tipEmoji={skin.tipEmoji}
+                />
+              ) : (
+                <div style={{ width: 70, height: 22, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>🔒</div>
+              )}
+              <span style={{ fontSize: 11, color: colors.textSecondary, whiteSpace: 'nowrap' }}>
+                {skin.name}　x{skin.quantity}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   肺部圖示 — 抽越多、肺會越黑
+   依「累積休息次數」計算黑化程度（0 ~ 1），從粉嫩色漸變到深黑色
+   ============================================================ */
+
+function hexLerp(hexA: string, hexB: string, t: number): string {
+  const clamp = Math.max(0, Math.min(1, t));
+  const a = hexA.replace('#', '');
+  const b = hexB.replace('#', '');
+  const ar = parseInt(a.substring(0, 2), 16);
+  const ag = parseInt(a.substring(2, 4), 16);
+  const ab = parseInt(a.substring(4, 6), 16);
+  const br = parseInt(b.substring(0, 2), 16);
+  const bg = parseInt(b.substring(2, 4), 16);
+  const bb = parseInt(b.substring(4, 6), 16);
+  const r = Math.round(ar + (br - ar) * clamp);
+  const g = Math.round(ag + (bg - ag) * clamp);
+  const bl = Math.round(ab + (bb - ab) * clamp);
+  const toHex = (n: number) => n.toString(16).padStart(2, '0');
+  return `#${toHex(r)}${toHex(g)}${toHex(bl)}`;
+}
+
+// 累積休息次數達到這個數字時，肺會呈現完全黑化
+const LUNG_FULLY_BLACK_AT_COUNT = 200;
+
+function LungIcon({ totalRestCount, size = 96 }: { totalRestCount: number; size?: number }) {
+  const t = Math.max(0, Math.min(1, totalRestCount / LUNG_FULLY_BLACK_AT_COUNT));
+  const fill = hexLerp('#FFD6E7', '#26262E', t);
+  const stroke = hexLerp('#FF9FCB', '#0D0D10', t);
+  const spotOpacity = 0.12 + t * 0.4; // 抽越多，黑斑越明顯
+
+  return (
+    <svg width={size} height={size} viewBox="0 0 100 100">
+      {/* 氣管 */}
+      <rect x="46" y="4" width="8" height="26" rx="4" fill={stroke} opacity={0.85} />
+      {/* 左肺 */}
+      <path
+        d="M46,26 C30,24 14,34 10,54 C7,70 14,86 28,88 C36,89 39,80 38,66 C37,52 40,34 46,26 Z"
+        fill={fill}
+        stroke={stroke}
+        strokeWidth={2}
+      />
+      {/* 右肺 */}
+      <path
+        d="M54,26 C70,24 86,34 90,54 C93,70 86,86 72,88 C64,89 61,80 62,66 C63,52 60,34 54,26 Z"
+        fill={fill}
+        stroke={stroke}
+        strokeWidth={2}
+      />
+      {/* 累積抽越多，浮現的黑斑就越深越明顯 */}
+      <circle cx="24" cy="55" r="6" fill={stroke} opacity={spotOpacity} />
+      <circle cx="34" cy="70" r="4" fill={stroke} opacity={spotOpacity} />
+      <circle cx="76" cy="60" r="5" fill={stroke} opacity={spotOpacity} />
+      <circle cx="68" cy="75" r="3.5" fill={stroke} opacity={spotOpacity} />
+    </svg>
+  );
+}
+
+/* ============================================================
+   陪抽房核心互動邏輯（自訂 Hook）
+   規則：沒有長按的情況下，一支菸靜靜燒完需要 10 分鐘（被動消耗）；
+   長按按鈕期間會「加速」消耗，放開後恢復正常被動速度。
+   放開時吐出的雲朵數量，取決於這次長按了多久：按越久，雲越多。
+   ============================================================ */
+
+const PASSIVE_BURN_DURATION_SECONDS = 600; // 沒按的話，一支菸燒 10 分鐘
+const BASE_DRAIN_PER_SECOND = 100 / PASSIVE_BURN_DURATION_SECONDS; // 被動消耗速度
+const HOLD_EXTRA_DRAIN_PER_SECOND = 0.8; // 長按時額外加速消耗的速度（數字越大燒越快）
+const AUTO_PUFF_INTERVAL_SECONDS = 14; // 沒按的時候，每隔幾秒自動冒一次雲（模擬真的在抽）
+const AUTO_PUFF_CLOUD_COUNT = 3; // 自動冒雲時的預設雲朵數
+
+// 長按秒數 → 吐出的雲朵數量：長按 1 秒只有一點點雲，長按 10 秒會有很多雲
+function computeHoldCloudCount(holdSeconds: number): number {
+  if (holdSeconds <= 0) return 1;
+  return Math.max(1, Math.min(16, Math.round(1 + holdSeconds * 1.3)));
+}
+
+function usePuffRoom(onFinished: (durationSeconds: number) => void, started: boolean) {
   const [cigaretteLength, setCigaretteLength] = useState(100);
   const [characterState, setCharacterState] = useState<CharacterState>('idle');
   const [puffTrigger, setPuffTrigger] = useState(0);
-  const [durationSeconds, setDurationSeconds] = useState(0);
+  const [puffCount, setPuffCount] = useState(AUTO_PUFF_CLOUD_COUNT);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const finishedRef = useRef(false);
-  const durationRef = useRef(0);
+  const isHoldingRef = useRef(false);
+  const elapsedRef = useRef(0);
+  const lengthRef = useRef(100);
+  const lastAutoPuffRef = useRef(0);
+  const idleTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  useEffect(() => {
-    const timer = setInterval(() => {
-      if (finishedRef.current) return;
-      durationRef.current += 1;
-      setDurationSeconds(durationRef.current);
-      setCigaretteLength((len) => Math.max(0, len - 0.5));
-    }, 1000);
-    return () => clearInterval(timer);
-  }, []);
-
-  useEffect(() => {
-    if (cigaretteLength <= 0 && !finishedRef.current) {
-      finishedRef.current = true;
-      setCharacterState('relaxed');
-      onFinished(durationRef.current);
-    }
-  }, [cigaretteLength, onFinished]);
-
-  const handleHoldStart = useCallback(() => {
-    if (finishedRef.current) return;
-    setCharacterState('inhale');
-    setCigaretteLength((len) => Math.max(0, len - 2));
-  }, []);
-
-  const handleHoldEnd = useCallback(() => {
-    if (finishedRef.current) return;
+  const triggerExhale = useCallback((count: number = AUTO_PUFF_CLOUD_COUNT) => {
     setCharacterState('exhale');
+    setPuffCount(count);
     setPuffTrigger((t) => t + 1);
-    setTimeout(() => {
-      if (!finishedRef.current) setCharacterState('idle');
+    if (idleTimeoutRef.current) clearTimeout(idleTimeoutRef.current);
+    idleTimeoutRef.current = setTimeout(() => {
+      if (!finishedRef.current && !isHoldingRef.current) setCharacterState('idle');
     }, 800);
   }, []);
 
-  return { cigaretteLength, characterState, puffTrigger, durationSeconds, handleHoldStart, handleHoldEnd };
+  useEffect(() => {
+    if (!started) return;
+    const timer = setInterval(() => {
+      if (finishedRef.current) return;
+
+      elapsedRef.current += 1;
+      setElapsedSeconds(elapsedRef.current);
+
+      // 被動消耗 + 長按時額外加速消耗
+      const drain = BASE_DRAIN_PER_SECOND + (isHoldingRef.current ? HOLD_EXTRA_DRAIN_PER_SECOND : 0);
+      lengthRef.current = Math.max(0, lengthRef.current - drain);
+      setCigaretteLength(lengthRef.current);
+
+      // 沒有長按時，每隔一段時間自動冒一次可愛雲朵
+      if (!isHoldingRef.current && elapsedRef.current - lastAutoPuffRef.current >= AUTO_PUFF_INTERVAL_SECONDS) {
+        lastAutoPuffRef.current = elapsedRef.current;
+        triggerExhale();
+      }
+
+      // 燒完
+      if (lengthRef.current <= 0 && !finishedRef.current) {
+        finishedRef.current = true;
+        setCharacterState('relaxed');
+        onFinished(elapsedRef.current);
+      }
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [onFinished, triggerExhale, started]);
+
+  const handleHoldStart = useCallback(() => {
+    if (finishedRef.current) return;
+    isHoldingRef.current = true;
+    if (idleTimeoutRef.current) clearTimeout(idleTimeoutRef.current);
+    setCharacterState('inhale');
+  }, []);
+
+  const handleHoldEnd = useCallback(
+    (holdSeconds: number = 0) => {
+      if (finishedRef.current) return;
+      isHoldingRef.current = false;
+      triggerExhale(computeHoldCloudCount(holdSeconds));
+    },
+    [triggerExhale]
+  );
+
+  return {
+    cigaretteLength,
+    characterState,
+    puffTrigger,
+    puffCount,
+    durationSeconds: elapsedSeconds,
+    handleHoldStart,
+    handleHoldEnd,
+  };
 }
 
 /* ============================================================
@@ -411,11 +832,20 @@ function usePuffRoom(onFinished: (durationSeconds: number) => void) {
 function HomeScreen({
   onStartPuff,
   onGoCollection,
+  onGoShop,
+  onGoBackpack,
+  onViewFriend,
+  skins,
 }: {
   onStartPuff: () => void;
   onGoCollection: () => void;
+  onGoShop: () => void;
+  onGoBackpack: () => void;
+  onViewFriend: (friendId: string) => void;
+  skins: SkinData[];
 }) {
   const progress = (mockCurrentUser.exp / mockCurrentUser.expToNextLevel) * 100;
+  const totalStickCount = skins.reduce((sum, s) => sum + s.quantity, 0);
 
   return (
     <div style={{ padding: `${spacing.md}px ${spacing.lg}px`, paddingBottom: 100 }}>
@@ -423,6 +853,12 @@ function HomeScreen({
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: spacing.md }}>
         <h1 style={{ fontSize: 26, fontWeight: 700, color: colors.textPrimary, margin: 0 }}>☁️ Cloud Puff</h1>
         <div style={{ display: 'flex', gap: spacing.md, fontSize: 20 }}>
+          <button onClick={onGoBackpack} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 20, padding: 0 }}>
+            🎒
+          </button>
+          <button onClick={onGoShop} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 20, padding: 0 }}>
+            🛍️
+          </button>
           <span>🔔</span>
           <span>⚙️</span>
         </div>
@@ -445,83 +881,141 @@ function HomeScreen({
         </div>
       </Card>
 
-      {/* 主 CTA */}
-      <div style={{ display: 'flex', justifyContent: 'center', margin: `${spacing.xl}px 0` }}>
-        <CloudButton label="開抽" onClick={onStartPuff} />
+      {/* 主 CTA：背包沒有應援棒的話，按下去改成先去商城兌換 */}
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', margin: `${spacing.xl}px 0`, gap: spacing.xs }}>
+        <CloudButton label="開抽" onClick={totalStickCount > 0 ? onStartPuff : onGoShop} />
+        {totalStickCount === 0 && (
+          <div style={{ fontSize: 12, color: colors.textSecondary }}>背包沒有應援棒了，點一下前往商城兌換</div>
+        )}
       </div>
 
-      {/* 好友區 */}
+      {/* 好友區：點頭像可以查看好友的完整放空紀錄 */}
       <SectionHeader title="我的好友" />
       <div style={{ display: 'flex', gap: spacing.md, overflowX: 'auto', paddingBottom: spacing.xs }}>
         {mockFriends.map((f) => (
-          <div key={f.id} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: 60, flexShrink: 0 }}>
+          <button
+            key={f.id}
+            onClick={() => onViewFriend(f.id)}
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              width: 60,
+              flexShrink: 0,
+              background: 'none',
+              border: 'none',
+              cursor: 'pointer',
+              padding: 0,
+            }}
+          >
             <AvatarBubble character={f.avatarCharacter} status={f.onlineStatus} size={52} />
             <span style={{ fontSize: 12, color: colors.textPrimary, marginTop: 4, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 60 }}>
               {f.nickname}
             </span>
-          </div>
+          </button>
         ))}
       </div>
 
-      {/* 群組區 */}
-      <SectionHeader title="我的群組" />
-      {mockGroups.map((g) => (
-        <div
-          key={g.id}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            background: colors.milkTea,
-            borderRadius: radius.card - 4,
-            padding: spacing.sm,
-            marginBottom: spacing.sm,
-          }}
-        >
-          <span style={{ fontSize: 22 }}>{g.emoji}</span>
-          <div style={{ flex: 1, marginLeft: spacing.sm }}>
-            <div style={{ fontSize: 16, fontWeight: 600, color: colors.textPrimary }}>{g.name}</div>
-            <div style={{ fontSize: 13, color: colors.textSecondary }}>
-              👥 {g.onlineCount}人在線 / {g.memberCount}人
-            </div>
-          </div>
-          <button
-            onClick={onStartPuff}
-            style={{
-              background: colors.softPink,
-              border: 'none',
-              borderRadius: radius.pill,
-              padding: `${spacing.xs}px ${spacing.md}px`,
-              fontSize: 13,
-              fontWeight: 600,
-              color: colors.textPrimary,
-              cursor: 'pointer',
-            }}
-          >
-            加入
-          </button>
-        </div>
-      ))}
-
       {/* 收藏預覽 */}
-      <SectionHeader title="我的菸盒收藏" onPressMore={onGoCollection} />
+      <SectionHeader title="我的應援棒收藏" onPressMore={onGoCollection} />
       <div style={{ display: 'flex', gap: spacing.sm }}>
-        {mockSkins.slice(0, 5).map((skin) => (
-          <div
+        {skins.slice(0, 5).map((skin) => {
+          const owned = skin.quantity > 0;
+          return (
+            <div
+              key={skin.id}
+              style={{
+                width: 56,
+                height: 56,
+                borderRadius: radius.card - 8,
+                background: owned ? skin.bodyFill : colors.surfaceMuted,
+                opacity: owned ? 1 : 0.5,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: 20,
+                border: owned ? `4px solid ${skin.handleColor}` : 'none',
+              }}
+            >
+              {owned ? skin.tipEmoji : '🔒'}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* 背包預覽：每隻應援棒目前的庫存數量 */}
+      <SectionHeader title="🎒 我的背包" onPressMore={onGoBackpack} />
+      <div style={{ display: 'flex', gap: spacing.sm, overflowX: 'auto', paddingBottom: spacing.xs }}>
+        {skins.map((skin) => (
+          <button
             key={skin.id}
+            onClick={onGoBackpack}
             style={{
-              width: 56,
-              height: 56,
+              flexShrink: 0,
+              width: 78,
+              background: colors.surface,
               borderRadius: radius.card - 8,
-              background: skin.unlocked ? skin.cloudColor : colors.surfaceMuted,
-              opacity: skin.unlocked ? 1 : 0.5,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontSize: 20,
+              padding: spacing.sm,
+              boxShadow: cardShadow,
+              border: 'none',
+              cursor: 'pointer',
+              textAlign: 'center',
+              opacity: skin.quantity > 0 ? 1 : 0.5,
             }}
           >
-            {skin.unlocked ? '☁️' : '🔒'}
-          </div>
+            <div style={{ fontSize: 22 }}>{skin.tipEmoji}</div>
+            <div
+              style={{
+                fontSize: 11,
+                color: colors.textPrimary,
+                marginTop: 2,
+                whiteSpace: 'nowrap',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+              }}
+            >
+              {skin.name}
+            </div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: colors.lavender, marginTop: 2 }}>x{skin.quantity}</div>
+          </button>
+        ))}
+      </div>
+
+      {/* 商城預覽 */}
+      <SectionHeader title="🛍️ 商城" onPressMore={onGoShop} />
+      <div style={{ display: 'flex', gap: spacing.sm, overflowX: 'auto', paddingBottom: spacing.xs }}>
+        {skins.slice(0, 4).map((skin) => (
+          <button
+            key={skin.id}
+            onClick={onGoShop}
+            style={{
+              flexShrink: 0,
+              width: 96,
+              background: colors.surface,
+              borderRadius: radius.card - 8,
+              padding: spacing.sm,
+              boxShadow: cardShadow,
+              border: 'none',
+              cursor: 'pointer',
+              textAlign: 'center',
+            }}
+          >
+            <div style={{ fontSize: 24 }}>{skin.tipEmoji}</div>
+            <div
+              style={{
+                fontSize: 12,
+                fontWeight: 600,
+                color: colors.textPrimary,
+                marginTop: 4,
+                whiteSpace: 'nowrap',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+              }}
+            >
+              {skin.name}
+            </div>
+            <div style={{ fontSize: 12, color: '#5FBF9F', fontWeight: 700, marginTop: 2 }}>{skin.price} 元</div>
+          </button>
         ))}
       </div>
     </div>
@@ -549,20 +1043,92 @@ function SectionHeader({ title, onPressMore }: { title: string; onPressMore?: ()
    ============================================================ */
 
 function PuffRoomScreen({
+  skins,
+  onConfirmSkin,
   onFinished,
   onExit,
 }: {
+  skins: SkinData[];
+  onConfirmSkin: (skinId: string) => void;
   onFinished: (durationSeconds: number) => void;
   onExit: () => void;
 }) {
-  const participants = [mockCurrentUser, mockFriends[1]];
-  const skin = mockSkins.find((s) => s.id === mockCurrentUser.equippedSkin) ?? mockSkins[0];
-  const { cigaretteLength, characterState, puffTrigger, durationSeconds, handleHoldStart, handleHoldEnd } =
-    usePuffRoom(onFinished);
+  // 還沒選應援棒之前是 null：要先選一隻才會真的開始燒
+  const [pickedSkinId, setPickedSkinId] = useState<string | null>(null);
+  const equippedSkin = skins.find((s) => s.id === pickedSkinId) ?? skins[0];
+
+  const { cigaretteLength, characterState, puffTrigger, puffCount, durationSeconds, handleHoldStart, handleHoldEnd } =
+    usePuffRoom(onFinished, pickedSkinId !== null);
 
   const minutes = String(Math.floor(durationSeconds / 60)).padStart(2, '0');
   const seconds = String(durationSeconds % 60).padStart(2, '0');
 
+  const handlePickSkin = (skinId: string) => {
+    onConfirmSkin(skinId); // 立刻扣背包庫存 1 隻、休息紀錄 +1
+    setPickedSkinId(skinId); // 鎖定這次要抽的款式，抽完前不能再換
+  };
+
+  // 階段一：選應援棒（選了就鎖定，不能再換）
+  if (!pickedSkinId) {
+    return (
+      <div style={{ minHeight: '100vh', background: colors.background, paddingBottom: 100 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: `${spacing.sm}px ${spacing.lg}px` }}>
+          <button onClick={onExit} style={{ background: 'none', border: 'none', fontSize: 16, color: colors.textPrimary, cursor: 'pointer' }}>
+            ← 退出房間
+          </button>
+        </div>
+        <div style={{ padding: `0 ${spacing.lg}px` }}>
+          <h2 style={{ fontSize: 20, fontWeight: 700, color: colors.textPrimary, margin: `0 0 ${spacing.xs}px` }}>選一隻應援棒開始抽</h2>
+          <div style={{ fontSize: 13, color: colors.textSecondary, marginBottom: spacing.md }}>
+            選好之後就會鎖定，這次沒抽完不能再換其他款式喔
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: spacing.md }}>
+            {skins.map((skin) => {
+              const owned = skin.quantity > 0;
+              return (
+                <button
+                  key={skin.id}
+                  onClick={() => owned && handlePickSkin(skin.id)}
+                  disabled={!owned}
+                  style={{
+                    background: colors.surface,
+                    borderRadius: radius.card,
+                    padding: spacing.md,
+                    textAlign: 'center',
+                    boxShadow: cardShadow,
+                    border: 'none',
+                    cursor: owned ? 'pointer' : 'default',
+                    opacity: owned ? 1 : 0.45,
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: 40 }}>
+                    {owned ? (
+                      <CloudCandleStick
+                        progress={100}
+                        width={110}
+                        height={32}
+                        handleColor={skin.handleColor}
+                        handleStroke={skin.handleStroke}
+                        bodyFill={skin.bodyFill}
+                        bodyStroke={skin.bodyStroke}
+                        tipEmoji={skin.tipEmoji}
+                      />
+                    ) : (
+                      <span style={{ fontSize: 24 }}>🔒</span>
+                    )}
+                  </div>
+                  <div style={{ fontSize: 15, fontWeight: 600, color: colors.textPrimary, marginTop: 8 }}>{skin.name}</div>
+                  <div style={{ fontSize: 13, color: colors.textSecondary, marginTop: 2 }}>背包 x{skin.quantity}</div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // 階段二：燃燒中（已鎖定款式，不能再換）
   return (
     <div
       style={{
@@ -579,48 +1145,87 @@ function PuffRoomScreen({
           ← 退出房間
         </button>
         <span style={{ fontSize: 13, color: colors.textSecondary }}>
-          ⏱ {minutes}:{seconds}
+          ⏱ 已放空 {minutes}:{seconds}
         </span>
       </div>
 
-      <CloudParticleLayer trigger={puffTrigger} cloudColor={skin.cloudColor} />
+      {/* 目前使用的應援棒（已鎖定，抽完前不能換） */}
+      <div style={{ textAlign: 'center', fontSize: 13, color: colors.textSecondary }}>
+        使用中：{equippedSkin.name}（這次抽完前不能換）
+      </div>
 
-      {/* 角色排列 */}
-      <div style={{ display: 'flex', justifyContent: 'center', gap: spacing.xl, marginTop: spacing.xxl }}>
-        {participants.map((p) => (
-          <CharacterAvatar
-            key={p.id}
-            character={p.avatarCharacter}
-            nickname={p.nickname}
-            state={p.id === mockCurrentUser.id ? characterState : 'idle'}
+      {/* 一個人的角色（個人放空模式） */}
+      <div style={{ display: 'flex', justifyContent: 'center', marginTop: spacing.lg }}>
+        <CharacterAvatar
+          character={mockCurrentUser.avatarCharacter}
+          nickname={mockCurrentUser.nickname}
+          state={characterState}
+        />
+      </div>
+
+      {/* 橫向應援棒：握把在左，棒身隨進度從右往左變短（外觀依裝備的收藏款式而定） */}
+      {/* 粒子從棒子尾巴（右側）附近冒出，往上飄散 */}
+      <div style={{ position: 'relative', display: 'flex', justifyContent: 'center', marginTop: spacing.xl, height: 64 }}>
+        <CloudCandleStick
+          progress={cigaretteLength}
+          width={240}
+          height={64}
+          handleColor={equippedSkin.handleColor}
+          handleStroke={equippedSkin.handleStroke}
+          bodyFill={equippedSkin.bodyFill}
+          bodyStroke={equippedSkin.bodyStroke}
+          tipEmoji={equippedSkin.tipEmoji}
+        />
+        <div style={{ position: 'absolute', left: '50%', bottom: '100%', width: 240, marginLeft: -120, height: 120 }}>
+          <CloudParticleLayer
+            trigger={puffTrigger}
+            count={puffCount}
+            particleColor={equippedSkin.particleColor}
+            particleEmoji={equippedSkin.particleEmoji}
+            originXPercent={78}
           />
-        ))}
+        </div>
       </div>
 
-      {/* 菸支長度 */}
-      <div style={{ padding: `0 ${spacing.lg}px`, marginTop: spacing.xl }}>
-        <ProgressBar progress={cigaretteLength} height={10} />
-        <div style={{ fontSize: 13, color: colors.textSecondary, marginTop: 4 }}>菸支剩餘 {Math.round(cigaretteLength)}%</div>
+      {/* 說明文字：不按大約 10 分鐘燒完，長按會加速消耗 */}
+      <div style={{ padding: `0 ${spacing.lg}px`, marginTop: spacing.md, textAlign: 'center' }}>
+        <div style={{ fontSize: 13, color: colors.textSecondary }}>
+          應援棒剩餘 {Math.round(cigaretteLength)}%　（放著不按約 10 分鐘燒完，長按會加速消耗）
+        </div>
       </div>
 
-      {/* 互動按鈕 */}
+      {/* 互動按鈕：按住會讓菸加速變短，放開恢復正常速度；長按越久，放開時吐出的雲越多 */}
       <div style={{ padding: spacing.lg, marginTop: 'auto' }}>
         <HoldToPuffButton onHoldStart={handleHoldStart} onHoldEnd={handleHoldEnd} />
+        <div style={{ textAlign: 'center', fontSize: 12, color: colors.textSecondary, marginTop: spacing.xs }}>
+          💡 長按越久，放開時吐出的雲會越多喔
+        </div>
       </div>
     </div>
   );
 }
 
-function HoldToPuffButton({ onHoldStart, onHoldEnd }: { onHoldStart: () => void; onHoldEnd: () => void }) {
+function HoldToPuffButton({
+  onHoldStart,
+  onHoldEnd,
+}: {
+  onHoldStart: () => void;
+  onHoldEnd: (holdSeconds: number) => void;
+}) {
   const [holding, setHolding] = useState(false);
+  const startRef = useRef<number | null>(null);
 
   const start = () => {
     setHolding(true);
+    startRef.current = Date.now();
     onHoldStart();
   };
   const end = () => {
     setHolding(false);
-    onHoldEnd();
+    const startedAt = startRef.current;
+    startRef.current = null;
+    const holdSeconds = startedAt ? (Date.now() - startedAt) / 1000 : 0;
+    onHoldEnd(holdSeconds);
   };
 
   return (
@@ -718,12 +1323,80 @@ function ResultScreen({
    畫面：收藏頁
    ============================================================ */
 
-function CollectionScreen() {
+function CollectionScreen({ skins }: { skins: SkinData[] }) {
   return (
     <div style={{ padding: `${spacing.md}px ${spacing.lg}px`, paddingBottom: 100 }}>
-      <h1 style={{ fontSize: 24, fontWeight: 700, color: colors.textPrimary, marginBottom: spacing.md }}>☁️ 我的菸盒收藏</h1>
+      <h1 style={{ fontSize: 24, fontWeight: 700, color: colors.textPrimary, marginBottom: spacing.md }}>☁️ 我的應援棒收藏</h1>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: spacing.md }}>
-        {mockSkins.map((skin) => (
+        {skins.map((skin) => {
+          const owned = skin.quantity > 0;
+          return (
+            <div
+              key={skin.id}
+              style={{
+                background: colors.surface,
+                borderRadius: radius.card,
+                padding: spacing.md,
+                textAlign: 'center',
+                boxShadow: cardShadow,
+                opacity: owned ? 1 : 0.55,
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: 40, position: 'relative' }}>
+                {owned ? (
+                  <CloudCandleStick
+                    progress={100}
+                    width={110}
+                    height={32}
+                    handleColor={skin.handleColor}
+                    handleStroke={skin.handleStroke}
+                    bodyFill={skin.bodyFill}
+                    bodyStroke={skin.bodyStroke}
+                    tipEmoji={skin.tipEmoji}
+                  />
+                ) : (
+                  <span style={{ fontSize: 24 }}>🔒</span>
+                )}
+              </div>
+              <div style={{ fontSize: 16, fontWeight: 600, color: colors.textPrimary, marginTop: 8 }}>{skin.name}</div>
+              <div style={{ fontSize: 13, color: colors.textSecondary }}>
+                {owned ? `背包庫存 x${skin.quantity}` : '尚未擁有，去商城兌換'}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   畫面：商城 — 目前所有應援棒全面 0 元
+   ============================================================ */
+
+function ShopScreen({
+  skins,
+  onPurchase,
+  onBack,
+}: {
+  skins: SkinData[];
+  onPurchase: (skinId: string) => void;
+  onBack: () => void;
+}) {
+  return (
+    <div style={{ padding: `${spacing.md}px ${spacing.lg}px`, paddingBottom: 100 }}>
+      <button
+        onClick={onBack}
+        style={{ background: 'none', border: 'none', fontSize: 15, color: colors.textSecondary, cursor: 'pointer', padding: 0, marginBottom: spacing.sm }}
+      >
+        ← 返回
+      </button>
+      <h1 style={{ fontSize: 24, fontWeight: 700, color: colors.textPrimary, marginBottom: spacing.xs }}>🛍️ 商城</h1>
+      <div style={{ fontSize: 13, color: colors.textSecondary, marginBottom: spacing.md }}>
+        限時開放，每次購買直接拿到 20 隻，會放進背包裡 ✨
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: spacing.md }}>
+        {skins.map((skin) => (
           <div
             key={skin.id}
             style={{
@@ -732,26 +1405,40 @@ function CollectionScreen() {
               padding: spacing.md,
               textAlign: 'center',
               boxShadow: cardShadow,
-              opacity: skin.unlocked ? 1 : 0.6,
             }}
           >
-            <div
-              style={{
-                width: 64,
-                height: 64,
-                margin: '0 auto',
-                borderRadius: radius.card - 8,
-                background: skin.unlocked ? skin.cloudColor : colors.surfaceMuted,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                fontSize: 28,
-              }}
-            >
-              {skin.unlocked ? '☁️' : '🔒'}
+            <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: 40 }}>
+              <CloudCandleStick
+                progress={100}
+                width={110}
+                height={32}
+                handleColor={skin.handleColor}
+                handleStroke={skin.handleStroke}
+                bodyFill={skin.bodyFill}
+                bodyStroke={skin.bodyStroke}
+                tipEmoji={skin.tipEmoji}
+              />
             </div>
             <div style={{ fontSize: 16, fontWeight: 600, color: colors.textPrimary, marginTop: 8 }}>{skin.name}</div>
-            {!skin.unlocked && <div style={{ fontSize: 13, color: colors.textSecondary }}>{skin.unlockHint}</div>}
+            <div style={{ fontSize: 14, fontWeight: 700, color: '#5FBF9F', marginTop: 4 }}>{skin.price} 元 / 20 隻</div>
+            <div style={{ fontSize: 12, color: colors.textSecondary, marginTop: 2 }}>背包目前 x{skin.quantity}</div>
+            <button
+              onClick={() => onPurchase(skin.id)}
+              style={{
+                marginTop: spacing.sm,
+                width: '100%',
+                padding: '8px 0',
+                borderRadius: radius.pill,
+                border: 'none',
+                cursor: 'pointer',
+                fontWeight: 600,
+                fontSize: 13,
+                background: colors.lavender,
+                color: colors.textOnColor,
+              }}
+            >
+              購買 +20
+            </button>
           </div>
         ))}
       </div>
@@ -760,44 +1447,174 @@ function CollectionScreen() {
 }
 
 /* ============================================================
-   畫面：統計頁
+   畫面：背包 — 顯示每種應援棒目前的庫存數量
+   開抽一次會用掉 1 隻；商城買一次會補 20 隻進來。
    ============================================================ */
 
-function StatsScreen() {
-  const topFriend = mockFriends[1];
+function BackpackScreen({
+  skins,
+  onBack,
+  onGoShop,
+}: {
+  skins: SkinData[];
+  onBack: () => void;
+  onGoShop: () => void;
+}) {
+  const totalCount = skins.reduce((sum, s) => sum + s.quantity, 0);
+
+  return (
+    <div style={{ padding: `${spacing.md}px ${spacing.lg}px`, paddingBottom: 100 }}>
+      <button
+        onClick={onBack}
+        style={{ background: 'none', border: 'none', fontSize: 15, color: colors.textSecondary, cursor: 'pointer', padding: 0, marginBottom: spacing.sm }}
+      >
+        ← 返回
+      </button>
+      <h1 style={{ fontSize: 24, fontWeight: 700, color: colors.textPrimary, marginBottom: spacing.xs }}>🎒 我的背包</h1>
+      <div style={{ fontSize: 13, color: colors.textSecondary, marginBottom: spacing.md }}>
+        目前共有 {totalCount} 隻應援棒，開抽一次會用掉 1 隻
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: spacing.md }}>
+        {skins.map((skin) => (
+          <div
+            key={skin.id}
+            style={{
+              background: colors.surface,
+              borderRadius: radius.card,
+              padding: spacing.md,
+              textAlign: 'center',
+              boxShadow: cardShadow,
+              opacity: skin.quantity > 0 ? 1 : 0.5,
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: 40 }}>
+              {skin.quantity > 0 ? (
+                <CloudCandleStick
+                  progress={100}
+                  width={110}
+                  height={32}
+                  handleColor={skin.handleColor}
+                  handleStroke={skin.handleStroke}
+                  bodyFill={skin.bodyFill}
+                  bodyStroke={skin.bodyStroke}
+                  tipEmoji={skin.tipEmoji}
+                />
+              ) : (
+                <span style={{ fontSize: 24 }}>📦</span>
+              )}
+            </div>
+            <div style={{ fontSize: 16, fontWeight: 600, color: colors.textPrimary, marginTop: 8 }}>{skin.name}</div>
+            <div style={{ fontSize: 15, fontWeight: 700, color: skin.quantity > 0 ? colors.lavender : colors.textSecondary, marginTop: 2 }}>
+              x{skin.quantity}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {totalCount === 0 && (
+        <button
+          onClick={onGoShop}
+          style={{
+            marginTop: spacing.lg,
+            width: '100%',
+            padding: '14px 0',
+            borderRadius: radius.pill,
+            border: 'none',
+            background: colors.lavender,
+            color: colors.textOnColor,
+            fontWeight: 600,
+            fontSize: 15,
+            cursor: 'pointer',
+          }}
+        >
+          背包空了，前往商城兌換
+        </button>
+      )}
+    </div>
+  );
+}
+
+/* ============================================================
+   畫面：放空紀錄（統計頁）
+   自己看沒有返回鍵；點好友頭像進來看時會多一個返回鍵。
+   ============================================================ */
+
+function StatsScreen({
+  user,
+  stats,
+  friendsById,
+  onBack,
+}: {
+  user: UserData;
+  stats: UserStats;
+  friendsById: Record<string, UserData>;
+  onBack?: () => void;
+}) {
+  const topPartner = stats.topPartnerId ? friendsById[stats.topPartnerId] : undefined;
 
   return (
     <div style={{ padding: `${spacing.md}px ${spacing.lg}px`, paddingBottom: 100, display: 'flex', flexDirection: 'column', gap: spacing.md }}>
-      <h1 style={{ fontSize: 24, fontWeight: 700, color: colors.textPrimary, margin: 0 }}>📊 我的放空紀錄</h1>
+      {onBack && (
+        <button
+          onClick={onBack}
+          style={{ alignSelf: 'flex-start', background: 'none', border: 'none', fontSize: 15, color: colors.textSecondary, cursor: 'pointer', padding: 0 }}
+        >
+          ← 返回
+        </button>
+      )}
+      <h1 style={{ fontSize: 24, fontWeight: 700, color: colors.textPrimary, margin: 0 }}>
+        {onBack ? `📊 ${user.nickname} 的放空紀錄` : '📊 我的放空紀錄'}
+      </h1>
 
-      <div style={{ display: 'flex', gap: spacing.md }}>
-        <Card style={{ flex: 1 }}>
-          <div style={{ fontSize: 13, color: colors.textSecondary }}>本週休息次數</div>
-          <div style={{ fontSize: 20, fontWeight: 600, color: colors.textPrimary, marginTop: 4 }}>12 次</div>
-        </Card>
-        <Card style={{ flex: 1 }}>
-          <div style={{ fontSize: 13, color: colors.textSecondary }}>累積休息時間</div>
-          <div style={{ fontSize: 20, fontWeight: 600, color: colors.textPrimary, marginTop: 4 }}>3小時20分</div>
-        </Card>
-      </div>
-
-      <Card>
-        <div style={{ fontSize: 20, fontWeight: 600, color: colors.textPrimary }}>最常一起陪抽</div>
-        <div style={{ color: colors.textSecondary, marginTop: 4 }}>
-          🦊 {topFriend.nickname}　×18次　❤️❤️❤️
+      {/* 肺部圖示：累積抽越多，肺會越黑 */}
+      <Card style={{ display: 'flex', alignItems: 'center', gap: spacing.md }}>
+        <LungIcon totalRestCount={stats.totalRestCount} size={84} />
+        <div>
+          <div style={{ fontSize: 15, fontWeight: 600, color: colors.textPrimary }}>肺部狀態</div>
+          <div style={{ fontSize: 13, color: colors.textSecondary, marginTop: 4 }}>
+            累積放空 {stats.totalRestCount} 次，抽越多肺會越黑喔
+          </div>
         </div>
       </Card>
 
+      {/* 今日 / 本月 / 累積休息次數 */}
+      <div style={{ display: 'flex', gap: spacing.sm }}>
+        <Card style={{ flex: 1, textAlign: 'center' }}>
+          <div style={{ fontSize: 13, color: colors.textSecondary }}>今日休息</div>
+          <div style={{ fontSize: 20, fontWeight: 700, color: colors.textPrimary, marginTop: 4 }}>{stats.todayRestCount} 次</div>
+        </Card>
+        <Card style={{ flex: 1, textAlign: 'center' }}>
+          <div style={{ fontSize: 13, color: colors.textSecondary }}>本月休息</div>
+          <div style={{ fontSize: 20, fontWeight: 700, color: colors.textPrimary, marginTop: 4 }}>{stats.monthRestCount} 次</div>
+        </Card>
+        <Card style={{ flex: 1, textAlign: 'center' }}>
+          <div style={{ fontSize: 13, color: colors.textSecondary }}>累積休息</div>
+          <div style={{ fontSize: 20, fontWeight: 700, color: colors.textPrimary, marginTop: 4 }}>{stats.totalRestCount} 次</div>
+        </Card>
+      </div>
+
+      {topPartner && (
+        <Card>
+          <div style={{ fontSize: 16, fontWeight: 600, color: colors.textPrimary }}>最常一起陪抽</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: spacing.sm, marginTop: 6 }}>
+            <AvatarBubble character={topPartner.avatarCharacter} size={36} status={topPartner.onlineStatus} />
+            <span style={{ color: colors.textSecondary }}>
+              {topPartner.nickname}　×{stats.topPartnerCount}次　❤️❤️❤️
+            </span>
+          </div>
+        </Card>
+      )}
+
       <Card>
         <div style={{ fontSize: 20, fontWeight: 600, color: colors.textPrimary, marginBottom: spacing.sm }}>歷史紀錄</div>
-        {mockHistory.map((h, idx) => (
+        {stats.history.map((h, idx) => (
           <div
             key={idx}
             style={{
               display: 'flex',
               justifyContent: 'space-between',
               padding: '6px 0',
-              borderBottom: idx < mockHistory.length - 1 ? `1px solid ${colors.surfaceMuted}` : 'none',
+              borderBottom: idx < stats.history.length - 1 ? `1px solid ${colors.surfaceMuted}` : 'none',
               fontSize: 14,
               color: colors.textPrimary,
             }}
@@ -871,12 +1688,45 @@ export default function App() {
   const [screen, setScreen] = useState<ScreenName>('home');
   const [activeTab, setActiveTab] = useState<'home' | 'collection' | 'stats'>('home');
   const [lastDuration, setLastDuration] = useState(0);
+  const [skins, setSkins] = useState<SkinData[]>(mockSkins);
+  const [viewingFriendId, setViewingFriendId] = useState<string | null>(null);
+  // 自己的放空紀錄要能即時更新，所以獨立成 state；好友的紀錄目前仍是靜態假資料
+  const [myStats, setMyStats] = useState<UserStats>(mockStatsById[mockCurrentUser.id]);
+
+  // 好友頭像點開查看放空紀錄時，也可能查到最常一起陪抽的人是自己，所以這裡包含自己
+  const allUsersById: Record<string, UserData> = {
+    [mockCurrentUser.id]: mockCurrentUser,
+    ...Object.fromEntries(mockFriends.map((f) => [f.id, f])),
+  };
 
   const handleStartPuff = () => setScreen('puffroom');
+
+  // 一選定應援棒（鎖定、開始抽）就立刻生效：背包那隻 -1、今日/本月/累積休息次數各 +1
+  const handleConfirmSkin = (skinId: string) => {
+    setSkins((prev) => prev.map((s) => (s.id === skinId ? { ...s, quantity: Math.max(0, s.quantity - 1) } : s)));
+    setMyStats((prev) => ({
+      ...prev,
+      todayRestCount: prev.todayRestCount + 1,
+      monthRestCount: prev.monthRestCount + 1,
+      totalRestCount: prev.totalRestCount + 1,
+    }));
+  };
+
+  // 真的抽完（燒完一支）：只補上這次的歷史紀錄，次數已經在選應援棒當下算過了，這裡不重複加
   const handlePuffFinished = (durationSeconds: number) => {
     setLastDuration(durationSeconds);
     setScreen('result');
+
+    const now = new Date();
+    const dateLabel = `${now.getMonth() + 1}/${now.getDate()}`;
+    const minutes = String(Math.floor(durationSeconds / 60)).padStart(2, '0');
+    const seconds = String(durationSeconds % 60).padStart(2, '0');
+    setMyStats((prev) => ({
+      ...prev,
+      history: [{ date: dateLabel, withWho: '獨自放空', duration: `${minutes}:${seconds}` }, ...prev.history].slice(0, 20),
+    }));
   };
+
   const handleExitRoom = () => {
     setScreen('home');
     setActiveTab('home');
@@ -889,6 +1739,21 @@ export default function App() {
   const handleTabChange = (tab: 'home' | 'collection' | 'stats') => {
     setActiveTab(tab);
     setScreen(tab);
+  };
+  const handleGoShop = () => setScreen('shop');
+  const handleGoBackpack = () => setScreen('backpack');
+  // 商城每買一次，直接進 20 隻到背包
+  const handlePurchase = (skinId: string) => {
+    setSkins((prev) => prev.map((s) => (s.id === skinId ? { ...s, quantity: s.quantity + 20 } : s)));
+  };
+  const handleViewFriend = (friendId: string) => {
+    setViewingFriendId(friendId);
+    setScreen('friend');
+  };
+  const handleBackFromFriend = () => {
+    setViewingFriendId(null);
+    setScreen('home');
+    setActiveTab('home');
   };
 
   return (
@@ -903,10 +1768,31 @@ export default function App() {
         position: 'relative',
       }}
     >
-      {screen === 'home' && <HomeScreen onStartPuff={handleStartPuff} onGoCollection={() => handleTabChange('collection')} />}
-      {screen === 'collection' && <CollectionScreen />}
-      {screen === 'stats' && <StatsScreen />}
-      {screen === 'puffroom' && <PuffRoomScreen onFinished={handlePuffFinished} onExit={handleExitRoom} />}
+      {screen === 'home' && (
+        <HomeScreen
+          onStartPuff={handleStartPuff}
+          onGoCollection={() => handleTabChange('collection')}
+          onGoShop={handleGoShop}
+          onGoBackpack={handleGoBackpack}
+          onViewFriend={handleViewFriend}
+          skins={skins}
+        />
+      )}
+      {screen === 'collection' && <CollectionScreen skins={skins} />}
+      {screen === 'backpack' && <BackpackScreen skins={skins} onBack={handleBackHome} onGoShop={handleGoShop} />}
+      {screen === 'stats' && <StatsScreen user={mockCurrentUser} stats={myStats} friendsById={allUsersById} />}
+      {screen === 'friend' && viewingFriendId && (
+        <StatsScreen
+          user={allUsersById[viewingFriendId]}
+          stats={viewingFriendId === mockCurrentUser.id ? myStats : mockStatsById[viewingFriendId]}
+          friendsById={allUsersById}
+          onBack={handleBackFromFriend}
+        />
+      )}
+      {screen === 'shop' && <ShopScreen skins={skins} onPurchase={handlePurchase} onBack={handleBackHome} />}
+      {screen === 'puffroom' && (
+        <PuffRoomScreen skins={skins} onConfirmSkin={handleConfirmSkin} onFinished={handlePuffFinished} onExit={handleExitRoom} />
+      )}
       {screen === 'result' && <ResultScreen durationSeconds={lastDuration} onReplay={handleReplay} onBackHome={handleBackHome} />}
 
       {(screen === 'home' || screen === 'collection' || screen === 'stats') && (
