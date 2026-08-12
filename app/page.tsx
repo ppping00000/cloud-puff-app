@@ -61,8 +61,6 @@ interface UserStats {
   todayRestCount: number;
   monthRestCount: number;
   totalRestCount: number;
-  topPartnerId?: string;
-  topPartnerCount?: number;
   history: RestHistoryItem[];
 }
 
@@ -99,23 +97,13 @@ const CHARACTER_EMOJI: Record<CharacterType, string> = {
 
 /* ---------------------- 假資料 ---------------------- */
 
-const mockCurrentUser: UserData = {
-  id: 'uid_me',
-  nickname: '雲朵貓',
-  avatarCharacter: 'cat',
-  level: 12,
-  exp: 340,
-  expToNextLevel: 500,
-  title: '放空大師',
-  onlineStatus: 'online',
-  equippedSkin: 'pink_stick',
-};
-
-const mockFriends: UserData[] = [
-  { id: 'uid_a', nickname: '小白', avatarCharacter: 'rabbit', level: 8, exp: 100, expToNextLevel: 300, title: '新手放空員', onlineStatus: 'online', equippedSkin: 'milktea_white_stick' },
-  { id: 'uid_b', nickname: '阿橘', avatarCharacter: 'fox', level: 15, exp: 220, expToNextLevel: 600, title: '陪伴達人', onlineStatus: 'online', equippedSkin: 'rainbow_stick' },
-  { id: 'uid_c', nickname: '胖胖', avatarCharacter: 'panda', level: 5, exp: 50, expToNextLevel: 200, title: '雲朵新人', onlineStatus: 'offline', equippedSkin: 'milktea_white_stick' },
-];
+// 一個「帳號」在雲端共用資料庫裡存的內容：頭像、背包庫存、放空紀錄
+// 沒有密碼、沒有登入驗證，純粹用暱稱當 key 做區分（簡易版帳號系統）
+interface AccountRecord {
+  avatarCharacter: CharacterType;
+  quantities: Record<string, number>; // 每款應援棒的背包庫存，key 是 skin id
+  stats: UserStats;
+}
 
 const mockSkins: SkinData[] = [
   {
@@ -190,32 +178,15 @@ const mockSkins: SkinData[] = [
   },
 ];
 
-// 每個使用者（自己 + 好友）的放空紀錄 — 全部歸零重新計算，之後靠真的開抽累積
-const mockStatsById: Record<string, UserStats> = {
-  uid_me: {
-    todayRestCount: 0,
-    monthRestCount: 0,
-    totalRestCount: 0,
-    history: [],
-  },
-  uid_a: {
-    todayRestCount: 0,
-    monthRestCount: 0,
-    totalRestCount: 0,
-    history: [],
-  },
-  uid_b: {
-    todayRestCount: 0,
-    monthRestCount: 0,
-    totalRestCount: 0,
-    history: [],
-  },
-  uid_c: {
-    todayRestCount: 0,
-    monthRestCount: 0,
-    totalRestCount: 0,
-    history: [],
-  },
+// 全新帳號一開始拿到的背包庫存（起始包）
+const STARTER_QUANTITIES: Record<string, number> = Object.fromEntries(mockSkins.map((s) => [s.id, s.quantity]));
+
+// 全新帳號一開始的放空紀錄（都從 0 開始）
+const STARTER_STATS: UserStats = {
+  todayRestCount: 0,
+  monthRestCount: 0,
+  totalRestCount: 0,
+  history: [],
 };
 
 /* ============================================================
@@ -603,73 +574,6 @@ function CloudCandleStick({
 }
 
 /* ============================================================
-   應援棒選擇器 — 在陪抽房裡切換這次要用收藏裡的哪一隻
-   鎖定中的款式顯示灰階、不能點選。
-   ============================================================ */
-
-function SkinPicker({
-  skins,
-  selectedId,
-  onSelect,
-}: {
-  skins: SkinData[];
-  selectedId: string;
-  onSelect: (id: string) => void;
-}) {
-  return (
-    <div>
-      <div style={{ padding: `0 ${spacing.lg}px`, fontSize: 13, color: colors.textSecondary, marginBottom: 6 }}>
-        選擇應援棒
-      </div>
-      <div style={{ display: 'flex', gap: spacing.sm, overflowX: 'auto', padding: `0 ${spacing.lg}px`, paddingBottom: spacing.xs }}>
-        {skins.map((skin) => {
-          const isSelected = skin.id === selectedId;
-          const owned = skin.quantity > 0;
-          return (
-            <button
-              key={skin.id}
-              onClick={() => owned && onSelect(skin.id)}
-              disabled={!owned}
-              style={{
-                flexShrink: 0,
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                gap: 4,
-                background: isSelected ? colors.surfaceMuted : 'transparent',
-                border: isSelected ? `2px solid ${colors.lavender}` : '2px solid transparent',
-                borderRadius: radius.card - 8,
-                padding: spacing.xs,
-                cursor: owned ? 'pointer' : 'default',
-                opacity: owned ? 1 : 0.4,
-              }}
-            >
-              {owned ? (
-                <CloudCandleStick
-                  progress={100}
-                  width={70}
-                  height={22}
-                  handleColor={skin.handleColor}
-                  handleStroke={skin.handleStroke}
-                  bodyFill={skin.bodyFill}
-                  bodyStroke={skin.bodyStroke}
-                  tipEmoji={skin.tipEmoji}
-                />
-              ) : (
-                <div style={{ width: 70, height: 22, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>🔒</div>
-              )}
-              <span style={{ fontSize: 11, color: colors.textSecondary, whiteSpace: 'nowrap' }}>
-                {skin.name}　x{skin.quantity}
-              </span>
-            </button>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-/* ============================================================
    肺部圖示 — 抽越多、肺會越黑
    依「累積休息次數」計算黑化程度（0 ~ 1），從粉嫩色漸變到深黑色
    ============================================================ */
@@ -830,22 +734,25 @@ function usePuffRoom(onFinished: (durationSeconds: number) => void, started: boo
    ============================================================ */
 
 function HomeScreen({
+  user,
   onStartPuff,
   onGoCollection,
   onGoShop,
   onGoBackpack,
-  onViewFriend,
+  onSearchFriend,
   skins,
 }: {
+  user: UserData;
   onStartPuff: () => void;
   onGoCollection: () => void;
   onGoShop: () => void;
   onGoBackpack: () => void;
-  onViewFriend: (friendId: string) => void;
+  onSearchFriend: (nickname: string) => void;
   skins: SkinData[];
 }) {
-  const progress = (mockCurrentUser.exp / mockCurrentUser.expToNextLevel) * 100;
+  const progress = (user.exp / user.expToNextLevel) * 100;
   const totalStickCount = skins.reduce((sum, s) => sum + s.quantity, 0);
+  const [friendInput, setFriendInput] = useState('');
 
   return (
     <div style={{ padding: `${spacing.md}px ${spacing.lg}px`, paddingBottom: 100 }}>
@@ -867,15 +774,15 @@ function HomeScreen({
       {/* 個人資料卡 */}
       <Card>
         <div style={{ display: 'flex', alignItems: 'center', gap: spacing.md }}>
-          <AvatarBubble character={mockCurrentUser.avatarCharacter} size={64} status={mockCurrentUser.onlineStatus} />
+          <AvatarBubble character={user.avatarCharacter} size={64} status={user.onlineStatus} />
           <div style={{ flex: 1 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ fontSize: 20, fontWeight: 600, color: colors.textPrimary }}>{mockCurrentUser.nickname}</span>
+              <span style={{ fontSize: 20, fontWeight: 600, color: colors.textPrimary }}>{user.nickname}</span>
               <span style={{ background: colors.mintGreen, borderRadius: 999, padding: '2px 8px', fontSize: 12, fontWeight: 600, color: colors.textPrimary }}>
-                Lv.{mockCurrentUser.level}
+                Lv.{user.level}
               </span>
             </div>
-            <div style={{ fontSize: 13, color: colors.textSecondary, margin: '4px 0' }}>稱號：{mockCurrentUser.title}</div>
+            <div style={{ fontSize: 13, color: colors.textSecondary, margin: '4px 0' }}>稱號：{user.title}</div>
             <ProgressBar progress={progress} />
           </div>
         </div>
@@ -889,31 +796,39 @@ function HomeScreen({
         )}
       </div>
 
-      {/* 好友區：點頭像可以查看好友的完整放空紀錄 */}
-      <SectionHeader title="我的好友" />
-      <div style={{ display: 'flex', gap: spacing.md, overflowX: 'auto', paddingBottom: spacing.xs }}>
-        {mockFriends.map((f) => (
-          <button
-            key={f.id}
-            onClick={() => onViewFriend(f.id)}
-            style={{
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              width: 60,
-              flexShrink: 0,
-              background: 'none',
-              border: 'none',
-              cursor: 'pointer',
-              padding: 0,
-            }}
-          >
-            <AvatarBubble character={f.avatarCharacter} status={f.onlineStatus} size={52} />
-            <span style={{ fontSize: 12, color: colors.textPrimary, marginTop: 4, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 60 }}>
-              {f.nickname}
-            </span>
-          </button>
-        ))}
+      {/* 好友：輸入朋友的暱稱可以查看他的放空紀錄（大家共用同一份雲端資料，用暱稱找人） */}
+      <SectionHeader title="查看朋友的放空紀錄" />
+      <div style={{ display: 'flex', gap: spacing.sm }}>
+        <input
+          value={friendInput}
+          onChange={(e) => setFriendInput(e.target.value)}
+          placeholder="輸入朋友的暱稱"
+          style={{
+            flex: 1,
+            padding: '10px 14px',
+            borderRadius: radius.input,
+            border: `1px solid ${colors.surfaceMuted}`,
+            fontSize: 14,
+            outline: 'none',
+          }}
+        />
+        <button
+          onClick={() => {
+            if (friendInput.trim()) onSearchFriend(friendInput.trim());
+          }}
+          style={{
+            padding: `0 ${spacing.md}px`,
+            borderRadius: radius.pill,
+            border: 'none',
+            background: colors.lavender,
+            color: colors.textOnColor,
+            fontWeight: 600,
+            fontSize: 14,
+            cursor: 'pointer',
+          }}
+        >
+          查看
+        </button>
       </div>
 
       {/* 收藏預覽 */}
@@ -1043,11 +958,13 @@ function SectionHeader({ title, onPressMore }: { title: string; onPressMore?: ()
    ============================================================ */
 
 function PuffRoomScreen({
+  user,
   skins,
   onConfirmSkin,
   onFinished,
   onExit,
 }: {
+  user: UserData;
   skins: SkinData[];
   onConfirmSkin: (skinId: string) => void;
   onFinished: (durationSeconds: number) => void;
@@ -1157,8 +1074,8 @@ function PuffRoomScreen({
       {/* 一個人的角色（個人放空模式） */}
       <div style={{ display: 'flex', justifyContent: 'center', marginTop: spacing.lg }}>
         <CharacterAvatar
-          character={mockCurrentUser.avatarCharacter}
-          nickname={mockCurrentUser.nickname}
+          character={user.avatarCharacter}
+          nickname={user.nickname}
           state={characterState}
         />
       </div>
@@ -1540,18 +1457,16 @@ function BackpackScreen({
    ============================================================ */
 
 function StatsScreen({
-  user,
+  nickname,
+  avatarCharacter,
   stats,
-  friendsById,
   onBack,
 }: {
-  user: UserData;
+  nickname: string;
+  avatarCharacter: CharacterType;
   stats: UserStats;
-  friendsById: Record<string, UserData>;
   onBack?: () => void;
 }) {
-  const topPartner = stats.topPartnerId ? friendsById[stats.topPartnerId] : undefined;
-
   return (
     <div style={{ padding: `${spacing.md}px ${spacing.lg}px`, paddingBottom: 100, display: 'flex', flexDirection: 'column', gap: spacing.md }}>
       {onBack && (
@@ -1562,9 +1477,12 @@ function StatsScreen({
           ← 返回
         </button>
       )}
-      <h1 style={{ fontSize: 24, fontWeight: 700, color: colors.textPrimary, margin: 0 }}>
-        {onBack ? `📊 ${user.nickname} 的放空紀錄` : '📊 我的放空紀錄'}
-      </h1>
+      <div style={{ display: 'flex', alignItems: 'center', gap: spacing.sm }}>
+        {onBack && <AvatarBubble character={avatarCharacter} size={36} />}
+        <h1 style={{ fontSize: 24, fontWeight: 700, color: colors.textPrimary, margin: 0 }}>
+          {onBack ? `📊 ${nickname} 的放空紀錄` : '📊 我的放空紀錄'}
+        </h1>
+      </div>
 
       {/* 肺部圖示：累積抽越多，肺會越黑 */}
       <Card style={{ display: 'flex', alignItems: 'center', gap: spacing.md }}>
@@ -1593,20 +1511,11 @@ function StatsScreen({
         </Card>
       </div>
 
-      {topPartner && (
-        <Card>
-          <div style={{ fontSize: 16, fontWeight: 600, color: colors.textPrimary }}>最常一起陪抽</div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: spacing.sm, marginTop: 6 }}>
-            <AvatarBubble character={topPartner.avatarCharacter} size={36} status={topPartner.onlineStatus} />
-            <span style={{ color: colors.textSecondary }}>
-              {topPartner.nickname}　×{stats.topPartnerCount}次　❤️❤️❤️
-            </span>
-          </div>
-        </Card>
-      )}
-
       <Card>
         <div style={{ fontSize: 20, fontWeight: 600, color: colors.textPrimary, marginBottom: spacing.sm }}>歷史紀錄</div>
+        {stats.history.length === 0 && (
+          <div style={{ fontSize: 13, color: colors.textSecondary }}>還沒有任何紀錄</div>
+        )}
         {stats.history.map((h, idx) => (
           <div
             key={idx}
@@ -1681,6 +1590,127 @@ function BottomTabBar({ active, onChange }: { active: 'home' | 'collection' | 's
 }
 
 /* ============================================================
+   簡易帳號系統 — 沒有密碼，純粹用「暱稱」當 key
+   資料存在共用的雲端資料庫（/api/account），大家共用同一份資料庫，
+   只是每個暱稱各自有自己的一份紀錄。
+   ============================================================ */
+
+async function fetchAccount(nickname: string): Promise<AccountRecord | null> {
+  try {
+    const res = await fetch(`/api/account?nickname=${encodeURIComponent(nickname)}`);
+    if (!res.ok) return null;
+    const json = await res.json();
+    return (json.data as AccountRecord) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function saveAccount(nickname: string, record: AccountRecord): Promise<void> {
+  try {
+    await fetch('/api/account', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ nickname, record }),
+    });
+  } catch {
+    // 存檔失敗先忽略，不影響當下操作；下次資料變動時還會再存一次
+  }
+}
+
+function NicknameScreen({ onConfirm }: { onConfirm: (nickname: string, avatarCharacter: CharacterType) => void }) {
+  const [nameInput, setNameInput] = useState('');
+  const [avatar, setAvatar] = useState<CharacterType>('cat');
+  const [submitting, setSubmitting] = useState(false);
+  const characterOptions: CharacterType[] = ['cat', 'panda', 'fox', 'rabbit'];
+
+  const handleSubmit = () => {
+    const trimmed = nameInput.trim();
+    if (!trimmed || submitting) return;
+    setSubmitting(true);
+    onConfirm(trimmed, avatar);
+  };
+
+  return (
+    <div
+      style={{
+        minHeight: '100vh',
+        background: colors.background,
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: spacing.xl,
+        gap: spacing.md,
+      }}
+    >
+      <div style={{ fontSize: 48 }}>☁️</div>
+      <h1 style={{ fontSize: 24, fontWeight: 700, color: colors.textPrimary, margin: 0 }}>歡迎來到 Cloud Puff</h1>
+      <div style={{ fontSize: 13, color: colors.textSecondary, textAlign: 'center' }}>
+        取一個暱稱就能開始，之後在這台裝置打開會自動記得你
+      </div>
+
+      <div style={{ display: 'flex', gap: spacing.sm, marginTop: spacing.md }}>
+        {characterOptions.map((c) => (
+          <button
+            key={c}
+            onClick={() => setAvatar(c)}
+            style={{
+              width: 52,
+              height: 52,
+              borderRadius: '50%',
+              border: avatar === c ? `2px solid ${colors.lavender}` : '2px solid transparent',
+              background: colors.surfaceMuted,
+              fontSize: 26,
+              cursor: 'pointer',
+            }}
+          >
+            {CHARACTER_EMOJI[c]}
+          </button>
+        ))}
+      </div>
+
+      <input
+        value={nameInput}
+        onChange={(e) => setNameInput(e.target.value)}
+        placeholder="輸入你的暱稱"
+        style={{
+          width: '100%',
+          maxWidth: 320,
+          padding: '14px 16px',
+          borderRadius: radius.input,
+          border: `1px solid ${colors.surfaceMuted}`,
+          fontSize: 15,
+          outline: 'none',
+          marginTop: spacing.md,
+        }}
+      />
+
+      <button
+        onClick={handleSubmit}
+        disabled={!nameInput.trim() || submitting}
+        style={{
+          width: '100%',
+          maxWidth: 320,
+          padding: '14px 0',
+          borderRadius: radius.pill,
+          border: 'none',
+          background: colors.lavender,
+          color: colors.textOnColor,
+          fontWeight: 600,
+          fontSize: 15,
+          cursor: nameInput.trim() ? 'pointer' : 'default',
+          opacity: nameInput.trim() ? 1 : 0.5,
+          marginTop: spacing.sm,
+        }}
+      >
+        {submitting ? '進入中…' : '開始放空'}
+      </button>
+    </div>
+  );
+}
+
+/* ============================================================
    主 App 元件（狀態切換取代路由，全部包在同一個檔案裡）
    ============================================================ */
 
@@ -1688,22 +1718,84 @@ export default function App() {
   const [screen, setScreen] = useState<ScreenName>('home');
   const [activeTab, setActiveTab] = useState<'home' | 'collection' | 'stats'>('home');
   const [lastDuration, setLastDuration] = useState(0);
-  const [skins, setSkins] = useState<SkinData[]>(mockSkins);
-  const [viewingFriendId, setViewingFriendId] = useState<string | null>(null);
-  // 自己的放空紀錄要能即時更新，所以獨立成 state；好友的紀錄目前仍是靜態假資料
-  const [myStats, setMyStats] = useState<UserStats>(mockStatsById[mockCurrentUser.id]);
 
-  // 好友頭像點開查看放空紀錄時，也可能查到最常一起陪抽的人是自己，所以這裡包含自己
-  const allUsersById: Record<string, UserData> = {
-    [mockCurrentUser.id]: mockCurrentUser,
-    ...Object.fromEntries(mockFriends.map((f) => [f.id, f])),
+  // 帳號狀態：nickname 為 null 代表還沒登入，先顯示輸入暱稱畫面
+  const [nickname, setNickname] = useState<string | null>(null);
+  const [accountReady, setAccountReady] = useState(false); // 雲端資料是否已經載入完成
+  const [avatarCharacter, setAvatarCharacter] = useState<CharacterType>('cat');
+  const [quantities, setQuantities] = useState<Record<string, number>>({});
+  const [myStats, setMyStats] = useState<UserStats>(STARTER_STATS);
+
+  const [friendRecord, setFriendRecord] = useState<{ nickname: string; avatarCharacter: CharacterType; stats: UserStats } | null>(null);
+  const [friendError, setFriendError] = useState<string | null>(null);
+
+  // 應援棒的外觀是固定的，只有「這個帳號各款式的庫存數量」是動態的
+  const skins: SkinData[] = mockSkins.map((s) => ({ ...s, quantity: quantities[s.id] ?? 0 }));
+
+  const displayUser: UserData = {
+    id: nickname ?? 'me',
+    nickname: nickname ?? '',
+    avatarCharacter,
+    level: 1,
+    exp: 0,
+    expToNextLevel: 100,
+    title: '放空愛好者',
+    onlineStatus: 'online',
+    equippedSkin: '',
+  };
+
+  // 打開網頁時，如果這台裝置記得暱稱，就自動用那個暱稱去雲端把資料抓回來
+  useEffect(() => {
+    const savedNickname = typeof window !== 'undefined' ? window.localStorage.getItem('cloudpuff_nickname') : null;
+    if (savedNickname) {
+      (async () => {
+        const record = await fetchAccount(savedNickname);
+        if (record) {
+          setAvatarCharacter(record.avatarCharacter);
+          setQuantities(record.quantities);
+          setMyStats(record.stats);
+        } else {
+          setAvatarCharacter('cat');
+          setQuantities(STARTER_QUANTITIES);
+          setMyStats(STARTER_STATS);
+        }
+        setNickname(savedNickname);
+        setAccountReady(true);
+      })();
+    }
+  }, []);
+
+  // 資料有變動（背包庫存、放空紀錄、頭像）就自動存回雲端資料庫，
+  // 這樣其他人用你的暱稱查詢時，看到的才是最新的
+  useEffect(() => {
+    if (!nickname || !accountReady) return;
+    saveAccount(nickname, { avatarCharacter, quantities, stats: myStats });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [quantities, myStats, avatarCharacter, nickname, accountReady]);
+
+  // 輸入暱稱畫面按下「開始放空」：如果這個暱稱雲端已經有資料就直接讀取，沒有的話幫他建一個新帳號
+  const handleCreateAccount = async (name: string, avatar: CharacterType) => {
+    const existing = await fetchAccount(name);
+    if (existing) {
+      setAvatarCharacter(existing.avatarCharacter);
+      setQuantities(existing.quantities);
+      setMyStats(existing.stats);
+    } else {
+      setAvatarCharacter(avatar);
+      setQuantities(STARTER_QUANTITIES);
+      setMyStats(STARTER_STATS);
+      await saveAccount(name, { avatarCharacter: avatar, quantities: STARTER_QUANTITIES, stats: STARTER_STATS });
+    }
+    window.localStorage.setItem('cloudpuff_nickname', name);
+    setNickname(name);
+    setAccountReady(true);
   };
 
   const handleStartPuff = () => setScreen('puffroom');
 
   // 一選定應援棒（鎖定、開始抽）就立刻生效：背包那隻 -1、今日/本月/累積休息次數各 +1
   const handleConfirmSkin = (skinId: string) => {
-    setSkins((prev) => prev.map((s) => (s.id === skinId ? { ...s, quantity: Math.max(0, s.quantity - 1) } : s)));
+    setQuantities((prev) => ({ ...prev, [skinId]: Math.max(0, (prev[skinId] ?? 0) - 1) }));
     setMyStats((prev) => ({
       ...prev,
       todayRestCount: prev.todayRestCount + 1,
@@ -1744,17 +1836,39 @@ export default function App() {
   const handleGoBackpack = () => setScreen('backpack');
   // 商城每買一次，直接進 20 隻到背包
   const handlePurchase = (skinId: string) => {
-    setSkins((prev) => prev.map((s) => (s.id === skinId ? { ...s, quantity: s.quantity + 20 } : s)));
+    setQuantities((prev) => ({ ...prev, [skinId]: (prev[skinId] ?? 0) + 20 }));
   };
-  const handleViewFriend = (friendId: string) => {
-    setViewingFriendId(friendId);
-    setScreen('friend');
+
+  // 輸入朋友暱稱查看他的放空紀錄：直接去共用的雲端資料庫用暱稱找
+  const handleSearchFriend = async (searchName: string) => {
+    setFriendError(null);
+    const record = await fetchAccount(searchName);
+    if (record) {
+      setFriendRecord({ nickname: searchName, avatarCharacter: record.avatarCharacter, stats: record.stats });
+      setScreen('friend');
+    } else {
+      setFriendError(`找不到暱稱「${searchName}」的放空紀錄，對方可能還沒開始玩`);
+    }
   };
   const handleBackFromFriend = () => {
-    setViewingFriendId(null);
+    setFriendRecord(null);
     setScreen('home');
     setActiveTab('home');
   };
+
+  // 還沒登入：先顯示輸入暱稱畫面
+  if (!nickname) {
+    return <NicknameScreen onConfirm={handleCreateAccount} />;
+  }
+
+  // 已經記得暱稱，但雲端資料還在載入中
+  if (!accountReady) {
+    return (
+      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: colors.background, color: colors.textSecondary }}>
+        載入中…
+      </div>
+    );
+  }
 
   return (
     <div
@@ -1770,33 +1884,62 @@ export default function App() {
     >
       {screen === 'home' && (
         <HomeScreen
+          user={displayUser}
           onStartPuff={handleStartPuff}
           onGoCollection={() => handleTabChange('collection')}
           onGoShop={handleGoShop}
           onGoBackpack={handleGoBackpack}
-          onViewFriend={handleViewFriend}
+          onSearchFriend={handleSearchFriend}
           skins={skins}
         />
       )}
       {screen === 'collection' && <CollectionScreen skins={skins} />}
       {screen === 'backpack' && <BackpackScreen skins={skins} onBack={handleBackHome} onGoShop={handleGoShop} />}
-      {screen === 'stats' && <StatsScreen user={mockCurrentUser} stats={myStats} friendsById={allUsersById} />}
-      {screen === 'friend' && viewingFriendId && (
+      {screen === 'stats' && <StatsScreen nickname={displayUser.nickname} avatarCharacter={avatarCharacter} stats={myStats} />}
+      {screen === 'friend' && friendRecord && (
         <StatsScreen
-          user={allUsersById[viewingFriendId]}
-          stats={viewingFriendId === mockCurrentUser.id ? myStats : mockStatsById[viewingFriendId]}
-          friendsById={allUsersById}
+          nickname={friendRecord.nickname}
+          avatarCharacter={friendRecord.avatarCharacter}
+          stats={friendRecord.stats}
           onBack={handleBackFromFriend}
         />
       )}
       {screen === 'shop' && <ShopScreen skins={skins} onPurchase={handlePurchase} onBack={handleBackHome} />}
       {screen === 'puffroom' && (
-        <PuffRoomScreen skins={skins} onConfirmSkin={handleConfirmSkin} onFinished={handlePuffFinished} onExit={handleExitRoom} />
+        <PuffRoomScreen
+          user={displayUser}
+          skins={skins}
+          onConfirmSkin={handleConfirmSkin}
+          onFinished={handlePuffFinished}
+          onExit={handleExitRoom}
+        />
       )}
       {screen === 'result' && <ResultScreen durationSeconds={lastDuration} onReplay={handleReplay} onBackHome={handleBackHome} />}
 
       {(screen === 'home' || screen === 'collection' || screen === 'stats') && (
         <BottomTabBar active={activeTab} onChange={handleTabChange} />
+      )}
+
+      {friendError && (
+        <div
+          style={{
+            position: 'fixed',
+            bottom: 90,
+            left: '50%',
+            transform: 'translateX(-50%)',
+            background: colors.textPrimary,
+            color: '#FFFFFF',
+            padding: '10px 16px',
+            borderRadius: radius.pill,
+            fontSize: 13,
+            maxWidth: '90%',
+            textAlign: 'center',
+            zIndex: 10,
+          }}
+          onClick={() => setFriendError(null)}
+        >
+          {friendError}
+        </div>
       )}
 
       <style jsx global>{`
