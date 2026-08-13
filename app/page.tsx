@@ -13,7 +13,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
       + 今日 / 本月 / 累積休息次數
    2. 點好友頭像可以查看好友的完整放空紀錄
    3. 開抽房：長按越久，放開後吐出的雲越多
-   4. 首頁新增「商城」，可購買應援棒（目前全面 0 元）
+   4. 首頁新增「商城」，可購買呼吸棒（目前全面 0 元）
    （放空紀錄 / 好友紀錄目前都是假資料，之後再串接真實資料）
    ============================================================ */
 
@@ -99,18 +99,26 @@ const CHARACTER_EMOJI: Record<CharacterType, string> = {
 
 // 一個「帳號」在雲端共用資料庫裡存的內容：頭像、背包庫存、放空紀錄
 // 沒有密碼、沒有登入驗證，純粹用暱稱當 key 做區分（簡易版帳號系統）
+interface CommentEntry {
+  from: string;
+  text: string;
+  date: string;
+}
+
 interface AccountRecord {
   avatarCharacter: CharacterType;
-  quantities: Record<string, number>; // 每款應援棒的背包庫存，key 是 skin id
+  quantities: Record<string, number>; // 每款呼吸棒的背包庫存，key 是 skin id
   stats: UserStats;
   friends?: string[]; // 已加的好友暱稱清單
   coins?: number; // 零錢包餘額（元），大家都從 0 元開始
+  comments?: CommentEntry[]; // 別人留在這個帳號放空紀錄下面的留言
+  tools?: Record<string, number>; // 特殊道具庫存，例如 breathThief（呼吸小偷）
 }
 
 const mockSkins: SkinData[] = [
   {
     id: 'milktea_white_stick',
-    name: '奶茶白應援棒',
+    name: '奶茶白呼吸棒',
     rarity: 'common',
     quantity: 5,
     price: 200,
@@ -124,7 +132,7 @@ const mockSkins: SkinData[] = [
   },
   {
     id: 'pink_stick',
-    name: '粉紅應援棒',
+    name: '粉紅呼吸棒',
     rarity: 'rare',
     quantity: 3,
     price: 200,
@@ -138,7 +146,7 @@ const mockSkins: SkinData[] = [
   },
   {
     id: 'rainbow_stick',
-    name: '彩虹應援棒',
+    name: '彩虹呼吸棒',
     rarity: 'epic',
     quantity: 2,
     price: 200,
@@ -152,7 +160,7 @@ const mockSkins: SkinData[] = [
   },
   {
     id: 'aurora_stick',
-    name: '極光應援棒',
+    name: '極光呼吸棒',
     rarity: 'epic',
     quantity: 0,
     price: 200,
@@ -166,7 +174,7 @@ const mockSkins: SkinData[] = [
   },
   {
     id: 'galaxy_stick',
-    name: '星河應援棒',
+    name: '星河呼吸棒',
     rarity: 'legendary',
     quantity: 0,
     price: 200,
@@ -194,13 +202,24 @@ const STARTER_STATS: UserStats = {
 // 全新帳號一開始的零錢包餘額
 const STARTER_COINS = 0;
 
-// 商城買一款應援棒（20 隻）要花的錢
+// 商城買一款呼吸棒（20 隻）要花的錢
 const SHOP_PRICE = 200;
 
-// 小遊戲「我是好寶寶」：每撿一隻應援棒進桶子可以賺多少錢
+// 小遊戲「我是好寶寶」：每撿一隻呼吸棒進桶子可以賺多少錢
 const GOOD_KID_COIN_PER_STICK = 1;
-// 遊戲場地上同時會有幾隻應援棒（撿走一隻就會馬上補一隻新的，等於無限生成）
+// 遊戲場地上同時會有幾隻呼吸棒（撿走一隻就會馬上補一隻新的，等於無限生成）
 const GOOD_KID_STICK_COUNT = 6;
+
+// 在朋友的放空紀錄下面留言一次，可以賺多少錢
+const COMMENT_COIN_REWARD = 1;
+
+// 商城買一個「呼吸小偷」道具要花的錢
+const BREATH_THIEF_PRICE = 50;
+// 呼吸小偷使用一次，會從朋友背包隨機偷走幾隻呼吸棒（1 ~ 50 隻之間隨機）
+const BREATH_THIEF_MIN_STEAL = 1;
+const BREATH_THIEF_MAX_STEAL = 50;
+// 道具庫存用的 key
+const TOOL_BREATH_THIEF = 'breathThief';
 
 /* ============================================================
    共用小元件（都定義在同一檔案內，不拆檔）
@@ -476,7 +495,7 @@ function CharacterAvatar({
 }
 
 /* ============================================================
-   應援棒元件 — 用來取代寫實菸支的可愛道具（橫向版本）
+   呼吸棒元件 — 用來取代寫實菸支的可愛道具（橫向版本）
    握把（固定在左側，顏色可換）+ 棒身（隨 progress 由右往左變短，顏色可換）
    尖端有微光符號取代火光（可換）；不含任何寫實香菸的視覺元素、不印文字。
    ============================================================ */
@@ -828,11 +847,11 @@ function HomeScreen({
         </div>
       </Card>
 
-      {/* 主 CTA：背包沒有應援棒的話，按下去改成先去商城兌換 */}
+      {/* 主 CTA：背包沒有呼吸棒的話，按下去改成先去商城兌換 */}
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', margin: `${spacing.xl}px 0`, gap: spacing.xs }}>
         <CloudButton label="開抽" onClick={totalStickCount > 0 ? onStartPuff : onGoShop} />
         {totalStickCount === 0 && (
-          <div style={{ fontSize: 12, color: colors.textSecondary }}>背包沒有應援棒了，點一下前往商城兌換</div>
+          <div style={{ fontSize: 12, color: colors.textSecondary }}>背包沒有呼吸棒了，點一下前往商城兌換</div>
         )}
       </div>
 
@@ -940,7 +959,7 @@ function HomeScreen({
       )}
 
       {/* 收藏預覽 */}
-      <SectionHeader title="我的應援棒收藏" onPressMore={onGoCollection} />
+      <SectionHeader title="我的呼吸棒收藏" onPressMore={onGoCollection} />
       <div style={{ display: 'flex', gap: spacing.sm }}>
         {skins.slice(0, 5).map((skin) => {
           const owned = skin.quantity > 0;
@@ -966,7 +985,7 @@ function HomeScreen({
         })}
       </div>
 
-      {/* 背包預覽：每隻應援棒目前的庫存數量 */}
+      {/* 背包預覽：每隻呼吸棒目前的庫存數量 */}
       <SectionHeader title="🎒 我的背包" onPressMore={onGoBackpack} />
       <div style={{ display: 'flex', gap: spacing.sm, overflowX: 'auto', paddingBottom: spacing.xs }}>
         {skins.map((skin) => (
@@ -1078,7 +1097,7 @@ function PuffRoomScreen({
   onFinished: (durationSeconds: number) => void;
   onExit: () => void;
 }) {
-  // 還沒選應援棒之前是 null：要先選一隻才會真的開始燒
+  // 還沒選呼吸棒之前是 null：要先選一隻才會真的開始燒
   const [pickedSkinId, setPickedSkinId] = useState<string | null>(null);
   const equippedSkin = skins.find((s) => s.id === pickedSkinId) ?? skins[0];
 
@@ -1093,7 +1112,7 @@ function PuffRoomScreen({
     setPickedSkinId(skinId); // 鎖定這次要抽的款式，抽完前不能再換
   };
 
-  // 階段一：選應援棒（選了就鎖定，不能再換）
+  // 階段一：選呼吸棒（選了就鎖定，不能再換）
   if (!pickedSkinId) {
     return (
       <div style={{ minHeight: '100vh', background: colors.background, paddingBottom: 100 }}>
@@ -1103,7 +1122,7 @@ function PuffRoomScreen({
           </button>
         </div>
         <div style={{ padding: `0 ${spacing.lg}px` }}>
-          <h2 style={{ fontSize: 20, fontWeight: 700, color: colors.textPrimary, margin: `0 0 ${spacing.xs}px` }}>選一隻應援棒開始抽</h2>
+          <h2 style={{ fontSize: 20, fontWeight: 700, color: colors.textPrimary, margin: `0 0 ${spacing.xs}px` }}>選一隻呼吸棒開始抽</h2>
           <div style={{ fontSize: 13, color: colors.textSecondary, marginBottom: spacing.md }}>
             選好之後就會鎖定，這次沒抽完不能再換其他款式喔
           </div>
@@ -1174,7 +1193,7 @@ function PuffRoomScreen({
         </span>
       </div>
 
-      {/* 目前使用的應援棒（已鎖定，抽完前不能換） */}
+      {/* 目前使用的呼吸棒（已鎖定，抽完前不能換） */}
       <div style={{ textAlign: 'center', fontSize: 13, color: colors.textSecondary }}>
         使用中：{equippedSkin.name}（這次抽完前不能換）
       </div>
@@ -1188,7 +1207,7 @@ function PuffRoomScreen({
         />
       </div>
 
-      {/* 橫向應援棒：握把在左，棒身隨進度從右往左變短（外觀依裝備的收藏款式而定） */}
+      {/* 橫向呼吸棒：握把在左，棒身隨進度從右往左變短（外觀依裝備的收藏款式而定） */}
       {/* 粒子從棒子尾巴（右側）附近冒出，往上飄散 */}
       <div style={{ position: 'relative', display: 'flex', justifyContent: 'center', marginTop: spacing.xl, height: 64 }}>
         <CloudCandleStick
@@ -1215,7 +1234,7 @@ function PuffRoomScreen({
       {/* 說明文字：不按大約 10 分鐘燒完，長按會加速消耗 */}
       <div style={{ padding: `0 ${spacing.lg}px`, marginTop: spacing.md, textAlign: 'center' }}>
         <div style={{ fontSize: 13, color: colors.textSecondary }}>
-          應援棒剩餘 {Math.round(cigaretteLength)}%　（放著不按約 10 分鐘燒完，長按會加速消耗）
+          呼吸棒剩餘 {Math.round(cigaretteLength)}%　（放著不按約 10 分鐘燒完，長按會加速消耗）
         </div>
       </div>
 
@@ -1351,7 +1370,7 @@ function ResultScreen({
 function CollectionScreen({ skins }: { skins: SkinData[] }) {
   return (
     <div style={{ padding: `${spacing.md}px ${spacing.lg}px`, paddingBottom: 100 }}>
-      <h1 style={{ fontSize: 24, fontWeight: 700, color: colors.textPrimary, marginBottom: spacing.md }}>☁️ 我的應援棒收藏</h1>
+      <h1 style={{ fontSize: 24, fontWeight: 700, color: colors.textPrimary, marginBottom: spacing.md }}>☁️ 我的呼吸棒收藏</h1>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: spacing.md }}>
         {skins.map((skin) => {
           const owned = skin.quantity > 0;
@@ -1397,8 +1416,8 @@ function CollectionScreen({ skins }: { skins: SkinData[] }) {
 
 /* ============================================================
    小遊戲：我是好寶寶
-   地上散落著應援棒，點一下把它撿進桶子裡，每撿一隻零錢包 +1 元。
-   應援棒無限生成：撿走一隻，馬上會在別的地方冒出一隻新的。
+   地上散落著呼吸棒，點一下把它撿進桶子裡，每撿一隻零錢包 +1 元。
+   呼吸棒無限生成：撿走一隻，馬上會在別的地方冒出一隻新的。
    ============================================================ */
 
 interface GroundStick {
@@ -1433,7 +1452,7 @@ function GoodKidGameScreen({
     setSticks((prev) => prev.map((s) => (s.id === id ? { ...s, collecting: true } : s)));
     onEarnCoin(GOOD_KID_COIN_PER_STICK);
     setCollectedThisRound((c) => c + 1);
-    // 飛進桶子的動畫播完後，把這隻換成新的一隻（應援棒無限生成，不會撿完）
+    // 飛進桶子的動畫播完後，把這隻換成新的一隻（呼吸棒無限生成，不會撿完）
     setTimeout(() => {
       setSticks((prev) => [...prev.filter((s) => s.id !== id), randomGroundStick()]);
     }, 320);
@@ -1461,7 +1480,7 @@ function GoodKidGameScreen({
         </div>
       </div>
 
-      {/* 遊戲區：地上散落著應援棒，點了就會飛進畫面下方的桶子 */}
+      {/* 遊戲區：地上散落著呼吸棒，點了就會飛進畫面下方的桶子 */}
       <div
         style={{
           position: 'relative',
@@ -1507,20 +1526,25 @@ function GoodKidGameScreen({
 }
 
 /* ============================================================
-   畫面：商城 — 每款應援棒 200 元／20 隻，用零錢包的錢購買
+   畫面：商城 — 每款呼吸棒 200 元／20 隻，用零錢包的錢購買
    ============================================================ */
 
 function ShopScreen({
   skins,
   coins,
+  breathThiefCount,
   onPurchase,
+  onBuyBreathThief,
   onBack,
 }: {
   skins: SkinData[];
   coins: number;
+  breathThiefCount: number;
   onPurchase: (skinId: string) => void;
+  onBuyBreathThief: () => void;
   onBack: () => void;
 }) {
+  const canAffordThief = coins >= BREATH_THIEF_PRICE;
   return (
     <div style={{ padding: `${spacing.md}px ${spacing.lg}px`, paddingBottom: 100 }}>
       <button
@@ -1536,6 +1560,49 @@ function ShopScreen({
       <div style={{ fontSize: 14, fontWeight: 700, color: colors.textPrimary, marginBottom: spacing.md }}>
         🪙 零錢包餘額：{coins} 元
       </div>
+
+      {/* 道具：呼吸小偷 */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: spacing.md,
+          background: colors.surface,
+          borderRadius: radius.card,
+          padding: spacing.md,
+          boxShadow: cardShadow,
+          marginBottom: spacing.md,
+        }}
+      >
+        <div style={{ fontSize: 36 }}>🕵️</div>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 16, fontWeight: 600, color: colors.textPrimary }}>呼吸小偷</div>
+          <div style={{ fontSize: 12, color: colors.textSecondary, marginTop: 2 }}>
+            去背包裡使用，隨機偷走朋友 1～50 隻呼吸棒
+          </div>
+          <div style={{ fontSize: 12, color: colors.textSecondary, marginTop: 2 }}>目前擁有 x{breathThiefCount}</div>
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: '#5FBF9F' }}>{BREATH_THIEF_PRICE} 元</div>
+          <button
+            onClick={() => canAffordThief && onBuyBreathThief()}
+            disabled={!canAffordThief}
+            style={{
+              padding: '6px 14px',
+              borderRadius: radius.pill,
+              border: 'none',
+              cursor: canAffordThief ? 'pointer' : 'default',
+              fontWeight: 600,
+              fontSize: 13,
+              background: canAffordThief ? colors.lavender : colors.surfaceMuted,
+              color: canAffordThief ? colors.textOnColor : colors.textSecondary,
+            }}
+          >
+            {canAffordThief ? '購買' : '餘額不足'}
+          </button>
+        </div>
+      </div>
+
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: spacing.md }}>
         {skins.map((skin) => {
           const affordable = coins >= skin.price;
@@ -1588,27 +1655,34 @@ function ShopScreen({
         })}
       </div>
       <div style={{ fontSize: 12, color: colors.textSecondary, marginTop: spacing.md, textAlign: 'center' }}>
-        沒錢了嗎？回首頁玩「🧸 我是好寶寶」小遊戲賺零用錢吧
+        沒錢了嗎？回首頁玩「🧸 我是好寶寶」小遊戲，或去朋友的放空紀錄留言賺零用錢吧
       </div>
     </div>
   );
 }
 
 /* ============================================================
-   畫面：背包 — 顯示每種應援棒目前的庫存數量
+   畫面：背包 — 顯示每種呼吸棒目前的庫存數量
    開抽一次會用掉 1 隻；商城買一次會補 20 隻進來。
    ============================================================ */
 
 function BackpackScreen({
   skins,
+  friends,
+  breathThiefCount,
+  onUseBreathThief,
   onBack,
   onGoShop,
 }: {
   skins: SkinData[];
+  friends: string[];
+  breathThiefCount: number;
+  onUseBreathThief: (targetNickname: string) => void;
   onBack: () => void;
   onGoShop: () => void;
 }) {
   const totalCount = skins.reduce((sum, s) => sum + s.quantity, 0);
+  const [showThiefPicker, setShowThiefPicker] = useState(false);
 
   return (
     <div style={{ padding: `${spacing.md}px ${spacing.lg}px`, paddingBottom: 100 }}>
@@ -1620,8 +1694,77 @@ function BackpackScreen({
       </button>
       <h1 style={{ fontSize: 24, fontWeight: 700, color: colors.textPrimary, marginBottom: spacing.xs }}>🎒 我的背包</h1>
       <div style={{ fontSize: 13, color: colors.textSecondary, marginBottom: spacing.md }}>
-        目前共有 {totalCount} 隻應援棒，開抽一次會用掉 1 隻
+        目前共有 {totalCount} 隻呼吸棒，開抽一次會用掉 1 隻
       </div>
+
+      {/* 道具：呼吸小偷 */}
+      {breathThiefCount > 0 && (
+        <div
+          style={{
+            background: colors.surface,
+            borderRadius: radius.card,
+            padding: spacing.md,
+            boxShadow: cardShadow,
+            marginBottom: spacing.md,
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: spacing.md }}>
+            <div style={{ fontSize: 32 }}>🕵️</div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 16, fontWeight: 600, color: colors.textPrimary }}>呼吸小偷 x{breathThiefCount}</div>
+              <div style={{ fontSize: 12, color: colors.textSecondary, marginTop: 2 }}>選一個朋友，隨機偷走他 1～50 隻呼吸棒</div>
+            </div>
+            <button
+              onClick={() => setShowThiefPicker((v) => !v)}
+              style={{
+                padding: '8px 16px',
+                borderRadius: radius.pill,
+                border: 'none',
+                background: colors.lavender,
+                color: colors.textOnColor,
+                fontWeight: 600,
+                fontSize: 13,
+                cursor: 'pointer',
+              }}
+            >
+              使用
+            </button>
+          </div>
+
+          {showThiefPicker && (
+            <div style={{ marginTop: spacing.md, borderTop: `1px solid ${colors.surfaceMuted}`, paddingTop: spacing.sm }}>
+              {friends.length === 0 && (
+                <div style={{ fontSize: 13, color: colors.textSecondary }}>還沒有好友可以偷，先去首頁加幾個好友吧</div>
+              )}
+              {friends.map((f) => (
+                <button
+                  key={f}
+                  onClick={() => {
+                    onUseBreathThief(f);
+                    setShowThiefPicker(false);
+                  }}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    width: '100%',
+                    padding: '10px 4px',
+                    background: 'none',
+                    border: 'none',
+                    borderBottom: `1px solid ${colors.surfaceMuted}`,
+                    cursor: 'pointer',
+                    textAlign: 'left',
+                  }}
+                >
+                  <span style={{ fontSize: 14, color: colors.textPrimary }}>{f}</span>
+                  <span style={{ fontSize: 13, color: colors.lavender, fontWeight: 600 }}>偷 TA →</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: spacing.md }}>
         {skins.map((skin) => (
           <div
@@ -1694,6 +1837,8 @@ function StatsScreen({
   onBack,
   isFriend,
   onToggleFriend,
+  comments,
+  onSubmitComment,
 }: {
   nickname: string;
   avatarCharacter: CharacterType;
@@ -1701,7 +1846,10 @@ function StatsScreen({
   onBack?: () => void;
   isFriend?: boolean;
   onToggleFriend?: () => void;
+  comments?: CommentEntry[];
+  onSubmitComment?: (text: string) => void;
 }) {
+  const [commentInput, setCommentInput] = useState('');
   return (
     <div style={{ padding: `${spacing.md}px ${spacing.lg}px`, paddingBottom: 100, display: 'flex', flexDirection: 'column', gap: spacing.md }}>
       {onBack && (
@@ -1789,6 +1937,68 @@ function StatsScreen({
           </div>
         ))}
       </Card>
+
+      {/* 留言：在朋友的放空紀錄下面留言，留一次自己就能賺 1 元；自己的頁面也能看到別人留給自己的留言 */}
+      <Card>
+        <div style={{ fontSize: 20, fontWeight: 600, color: colors.textPrimary, marginBottom: spacing.sm }}>留言</div>
+        {onSubmitComment && (
+          <div style={{ display: 'flex', gap: spacing.sm, marginBottom: spacing.sm }}>
+              <input
+                value={commentInput}
+                onChange={(e) => setCommentInput(e.target.value)}
+                placeholder={`跟 ${nickname} 說句話（留言 +1 元）`}
+                style={{
+                  flex: 1,
+                  padding: '10px 14px',
+                  borderRadius: radius.input,
+                  border: `1px solid ${colors.surfaceMuted}`,
+                  fontSize: 14,
+                  outline: 'none',
+                }}
+              />
+              <button
+                onClick={() => {
+                  const trimmed = commentInput.trim();
+                  if (trimmed) {
+                    onSubmitComment(trimmed);
+                    setCommentInput('');
+                  }
+                }}
+                style={{
+                  padding: `0 ${spacing.md}px`,
+                  borderRadius: radius.pill,
+                  border: 'none',
+                  background: colors.lavender,
+                  color: colors.textOnColor,
+                  fontWeight: 600,
+                  fontSize: 14,
+                  cursor: 'pointer',
+                }}
+              >
+                留言
+              </button>
+            </div>
+          )}
+          {(!comments || comments.length === 0) && (
+            <div style={{ fontSize: 13, color: colors.textSecondary }}>還沒有人留言，第一個留言的人先賺 1 元 ✨</div>
+          )}
+          {comments &&
+            comments.map((c, idx) => (
+              <div
+                key={idx}
+                style={{
+                  padding: '8px 0',
+                  borderBottom: idx < comments.length - 1 ? `1px solid ${colors.surfaceMuted}` : 'none',
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: colors.textSecondary }}>
+                  <span style={{ fontWeight: 600, color: colors.textPrimary }}>{c.from}</span>
+                  <span>{c.date}</span>
+                </div>
+                <div style={{ fontSize: 14, color: colors.textPrimary, marginTop: 2 }}>{c.text}</div>
+              </div>
+            ))}
+        </Card>
     </div>
   );
 }
@@ -1951,6 +2161,42 @@ async function saveAccount(nickname: string, record: AccountRecord): Promise<voi
   }
 }
 
+// 呼吸小偷：去某個朋友的背包裡隨機偷走 1 ~ 50 隻呼吸棒（受限於對方實際擁有的數量）
+// 回傳實際偷到的內容（每款偷了幾隻），並且會直接把朋友那邊的背包扣掉、存回雲端
+async function stealSticksFromFriend(
+  friendNickname: string,
+  minSteal: number,
+  maxSteal: number
+): Promise<{ success: boolean; stolen: Record<string, number> }> {
+  const friendAccount = await fetchAccount(friendNickname);
+  if (!friendAccount) return { success: false, stolen: {} };
+
+  // 把朋友背包裡每一隻呼吸棒都攤開成一個「池子」，方便隨機抽
+  const pool: string[] = [];
+  for (const [skinId, qty] of Object.entries(friendAccount.quantities)) {
+    for (let i = 0; i < qty; i++) pool.push(skinId);
+  }
+  // 洗牌
+  for (let i = pool.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [pool[i], pool[j]] = [pool[j], pool[i]];
+  }
+
+  const targetAmount = Math.floor(minSteal + Math.random() * (maxSteal - minSteal + 1));
+  const takenIds = pool.slice(0, Math.min(targetAmount, pool.length));
+
+  const stolen: Record<string, number> = {};
+  for (const id of takenIds) stolen[id] = (stolen[id] ?? 0) + 1;
+
+  const newFriendQuantities = { ...friendAccount.quantities };
+  for (const [id, count] of Object.entries(stolen)) {
+    newFriendQuantities[id] = Math.max(0, (newFriendQuantities[id] ?? 0) - count);
+  }
+
+  await saveAccount(friendNickname, { ...friendAccount, quantities: newFriendQuantities });
+  return { success: true, stolen };
+}
+
 function NicknameScreen({ onConfirm }: { onConfirm: (nickname: string, avatarCharacter: CharacterType) => void }) {
   const [nameInput, setNameInput] = useState('');
   const [avatar, setAvatar] = useState<CharacterType>('cat');
@@ -2059,8 +2305,12 @@ export default function App() {
   const [quantities, setQuantities] = useState<Record<string, number>>({});
   const [myStats, setMyStats] = useState<UserStats>(STARTER_STATS);
   const [coins, setCoins] = useState<number>(STARTER_COINS);
+  const [tools, setTools] = useState<Record<string, number>>({}); // 特殊道具庫存，例如呼吸小偷
+  const breathThiefCount = tools[TOOL_BREATH_THIEF] ?? 0;
+  const [myComments, setMyComments] = useState<CommentEntry[]>([]); // 別人留在我放空紀錄下面的留言
 
-  const [friendRecord, setFriendRecord] = useState<{ nickname: string; avatarCharacter: CharacterType; stats: UserStats } | null>(null);
+  // 好友頁面現在存整個帳號資料（含留言、庫存），這樣留言／偷竊才能直接改好存回去
+  const [friendRecord, setFriendRecord] = useState<{ nickname: string; record: AccountRecord } | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   // 已加的好友暱稱清單，以及每個好友的頭像快取（用來在首頁直接顯示頭像，不用每次都重新查）
@@ -2071,7 +2321,7 @@ export default function App() {
   const [leaderboardEntries, setLeaderboardEntries] = useState<LeaderboardEntry[]>([]);
   const [leaderboardLoading, setLeaderboardLoading] = useState(false);
 
-  // 應援棒的外觀是固定的，只有「這個帳號各款式的庫存數量」是動態的
+  // 呼吸棒的外觀是固定的，只有「這個帳號各款式的庫存數量」是動態的
   const skins: SkinData[] = mockSkins.map((s) => ({ ...s, quantity: quantities[s.id] ?? 0 }));
 
   const displayUser: UserData = {
@@ -2098,12 +2348,16 @@ export default function App() {
           setMyStats(record.stats);
           setFriends(record.friends ?? []);
           setCoins(record.coins ?? STARTER_COINS);
+          setTools(record.tools ?? {});
+          setMyComments(record.comments ?? []);
         } else {
           setAvatarCharacter('cat');
           setQuantities(STARTER_QUANTITIES);
           setMyStats(STARTER_STATS);
           setFriends([]);
           setCoins(STARTER_COINS);
+          setTools({});
+          setMyComments([]);
         }
         setNickname(savedNickname);
         setAccountReady(true);
@@ -2111,13 +2365,13 @@ export default function App() {
     }
   }, []);
 
-  // 資料有變動（背包庫存、放空紀錄、頭像、好友清單、零錢包）就自動存回雲端資料庫，
+  // 資料有變動（背包庫存、放空紀錄、頭像、好友清單、零錢包、道具、收到的留言）就自動存回雲端資料庫，
   // 這樣其他人用你的暱稱查詢時，看到的才是最新的
   useEffect(() => {
     if (!nickname || !accountReady) return;
-    saveAccount(nickname, { avatarCharacter, quantities, stats: myStats, friends, coins });
+    saveAccount(nickname, { avatarCharacter, quantities, stats: myStats, friends, coins, tools, comments: myComments });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [quantities, myStats, avatarCharacter, friends, coins, nickname, accountReady]);
+  }, [quantities, myStats, avatarCharacter, friends, coins, tools, myComments, nickname, accountReady]);
 
   // 輸入暱稱畫面按下「開始放空」：如果這個暱稱雲端已經有資料就直接讀取，沒有的話幫他建一個新帳號
   const handleCreateAccount = async (name: string, avatar: CharacterType) => {
@@ -2128,18 +2382,24 @@ export default function App() {
       setMyStats(existing.stats);
       setFriends(existing.friends ?? []);
       setCoins(existing.coins ?? STARTER_COINS);
+      setTools(existing.tools ?? {});
+      setMyComments(existing.comments ?? []);
     } else {
       setAvatarCharacter(avatar);
       setQuantities(STARTER_QUANTITIES);
       setMyStats(STARTER_STATS);
       setFriends([]);
       setCoins(STARTER_COINS);
+      setTools({});
+      setMyComments([]);
       await saveAccount(name, {
         avatarCharacter: avatar,
         quantities: STARTER_QUANTITIES,
         stats: STARTER_STATS,
         friends: [],
         coins: STARTER_COINS,
+        tools: {},
+        comments: [],
       });
     }
     window.localStorage.setItem('cloudpuff_nickname', name);
@@ -2168,7 +2428,7 @@ export default function App() {
 
   const handleStartPuff = () => setScreen('puffroom');
 
-  // 一選定應援棒（鎖定、開始抽）就立刻生效：背包那隻 -1、今日/本月/累積休息次數各 +1
+  // 一選定呼吸棒（鎖定、開始抽）就立刻生效：背包那隻 -1、今日/本月/累積休息次數各 +1
   const handleConfirmSkin = (skinId: string) => {
     setQuantities((prev) => ({ ...prev, [skinId]: Math.max(0, (prev[skinId] ?? 0) - 1) }));
     setMyStats((prev) => ({
@@ -2179,7 +2439,7 @@ export default function App() {
     }));
   };
 
-  // 真的抽完（燒完一支）：只補上這次的歷史紀錄，次數已經在選應援棒當下算過了，這裡不重複加
+  // 真的抽完（燒完一支）：只補上這次的歷史紀錄，次數已經在選呼吸棒當下算過了，這裡不重複加
   const handlePuffFinished = (durationSeconds: number) => {
     setLastDuration(durationSeconds);
     setScreen('result');
@@ -2239,7 +2499,16 @@ export default function App() {
     setCoins((prev) => prev - SHOP_PRICE);
     setQuantities((prev) => ({ ...prev, [skinId]: (prev[skinId] ?? 0) + 20 }));
   };
-  // 小遊戲「我是好寶寶」每撿一隻應援棒，零錢包就 +amount 元
+  // 商城買一個呼吸小偷道具，要花 BREATH_THIEF_PRICE 元
+  const handleBuyBreathThief = () => {
+    if (coins < BREATH_THIEF_PRICE) {
+      setToastMessage('零錢包餘額不足');
+      return;
+    }
+    setCoins((prev) => prev - BREATH_THIEF_PRICE);
+    setTools((prev) => ({ ...prev, [TOOL_BREATH_THIEF]: (prev[TOOL_BREATH_THIEF] ?? 0) + 1 }));
+  };
+  // 小遊戲「我是好寶寶」每撿一隻呼吸棒，零錢包就 +amount 元
   const handleEarnCoin = (amount: number) => {
     setCoins((prev) => prev + amount);
   };
@@ -2249,7 +2518,7 @@ export default function App() {
     setToastMessage(null);
     const record = await fetchAccount(searchName);
     if (record) {
-      setFriendRecord({ nickname: searchName, avatarCharacter: record.avatarCharacter, stats: record.stats });
+      setFriendRecord({ nickname: searchName, record });
       setScreen('friend');
     } else {
       setToastMessage(`找不到暱稱「${searchName}」的放空紀錄，對方可能還沒開始玩`);
@@ -2292,7 +2561,49 @@ export default function App() {
       handleRemoveFriend(friendRecord.nickname);
     } else {
       setFriends((prev) => [...prev, friendRecord.nickname]);
-      setFriendProfiles((prev) => ({ ...prev, [friendRecord.nickname]: friendRecord.avatarCharacter }));
+      setFriendProfiles((prev) => ({ ...prev, [friendRecord.nickname]: friendRecord.record.avatarCharacter }));
+    }
+  };
+
+  // 在朋友的放空紀錄下面留言：存到對方帳號的留言清單，自己則賺 COMMENT_COIN_REWARD 元
+  const handleSubmitComment = async (text: string) => {
+    if (!friendRecord || !nickname) return;
+    const now = new Date();
+    const dateLabel = `${now.getMonth() + 1}/${now.getDate()}`;
+    const newComment: CommentEntry = { from: nickname, text, date: dateLabel };
+    const updatedRecord: AccountRecord = {
+      ...friendRecord.record,
+      comments: [newComment, ...(friendRecord.record.comments ?? [])].slice(0, 50),
+    };
+    setFriendRecord({ nickname: friendRecord.nickname, record: updatedRecord });
+    await saveAccount(friendRecord.nickname, updatedRecord);
+    setCoins((prev) => prev + COMMENT_COIN_REWARD);
+  };
+
+  // 在背包使用呼吸小偷：選一個朋友，隨機偷走他 1～50 隻呼吸棒，偷到的直接進自己背包
+  const handleUseBreathThief = async (targetNickname: string) => {
+    if (breathThiefCount <= 0) {
+      setToastMessage('沒有呼吸小偷了，先去商城買一個');
+      return;
+    }
+    setTools((prev) => ({ ...prev, [TOOL_BREATH_THIEF]: Math.max(0, (prev[TOOL_BREATH_THIEF] ?? 0) - 1) }));
+    const result = await stealSticksFromFriend(targetNickname, BREATH_THIEF_MIN_STEAL, BREATH_THIEF_MAX_STEAL);
+    if (!result.success) {
+      setToastMessage(`偷竊失敗，找不到「${targetNickname}」的帳號`);
+      return;
+    }
+    const totalStolen = Object.values(result.stolen).reduce((a, b) => a + b, 0);
+    if (totalStolen > 0) {
+      setQuantities((prev) => {
+        const next = { ...prev };
+        for (const [id, count] of Object.entries(result.stolen)) {
+          next[id] = (next[id] ?? 0) + count;
+        }
+        return next;
+      });
+      setToastMessage(`偷到了 ${totalStolen} 隻呼吸棒！`);
+    } else {
+      setToastMessage(`${targetNickname} 的背包是空的，什麼都沒偷到`);
     }
   };
 
@@ -2339,19 +2650,41 @@ export default function App() {
         />
       )}
       {screen === 'collection' && <CollectionScreen skins={skins} />}
-      {screen === 'backpack' && <BackpackScreen skins={skins} onBack={handleBackHome} onGoShop={handleGoShop} />}
-      {screen === 'stats' && <StatsScreen nickname={displayUser.nickname} avatarCharacter={avatarCharacter} stats={myStats} />}
+      {screen === 'backpack' && (
+        <BackpackScreen
+          skins={skins}
+          friends={friends}
+          breathThiefCount={breathThiefCount}
+          onUseBreathThief={handleUseBreathThief}
+          onBack={handleBackHome}
+          onGoShop={handleGoShop}
+        />
+      )}
+      {screen === 'stats' && (
+        <StatsScreen nickname={displayUser.nickname} avatarCharacter={avatarCharacter} stats={myStats} comments={myComments} />
+      )}
       {screen === 'friend' && friendRecord && (
         <StatsScreen
           nickname={friendRecord.nickname}
-          avatarCharacter={friendRecord.avatarCharacter}
-          stats={friendRecord.stats}
+          avatarCharacter={friendRecord.record.avatarCharacter}
+          stats={friendRecord.record.stats}
           onBack={handleBackFromFriend}
           isFriend={friends.includes(friendRecord.nickname)}
           onToggleFriend={handleToggleFriend}
+          comments={friendRecord.record.comments ?? []}
+          onSubmitComment={handleSubmitComment}
         />
       )}
-      {screen === 'shop' && <ShopScreen skins={skins} coins={coins} onPurchase={handlePurchase} onBack={handleBackHome} />}
+      {screen === 'shop' && (
+        <ShopScreen
+          skins={skins}
+          coins={coins}
+          breathThiefCount={breathThiefCount}
+          onPurchase={handlePurchase}
+          onBuyBreathThief={handleBuyBreathThief}
+          onBack={handleBackHome}
+        />
+      )}
       {screen === 'goodkid' && <GoodKidGameScreen coins={coins} onEarnCoin={handleEarnCoin} />}
       {screen === 'leaderboard' && (
         <LeaderboardScreen entries={leaderboardEntries} loading={leaderboardLoading} onBack={handleBackHome} />
