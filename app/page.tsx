@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 
 /* ============================================================
-   Cloud Puff ☁️ — Web 單檔元件版（第十一版）
+   Cloud Puff ☁️ — Web 單檔元件版（第十二版）
    直接把這個檔案放到 Next.js 專案的 app/page.tsx（或任一 page）
    即可部署到 Vercel。全部邏輯、樣式、假資料都包在同一個檔案裡，
    使用 styled-jsx（Next.js 內建，免安裝）做動畫與樣式。
@@ -14,6 +14,9 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
    3. 歷史紀錄加上「開抽時間」（幾點幾分開始抽）
    4. 🔔 好友開抽也會收到通知：「OOO 又在抽了，他真的很可憐🥺」
       （加好友時會順便登記成對方的 watcher，對方開抽時就會通知你）
+   5. 🎫 呼吸券：完整抽完一整支呼吸棒就會拿到一張，可以在背包使用，
+      搶朋友的錢（一次 100～200 元），對方會收到通知：
+      「OOO：把錢拿來讓我去治病」
    ============================================================ */
 
 /* ---------------------- 型別 ---------------------- */
@@ -63,11 +66,12 @@ interface UserStats {
   history: RestHistoryItem[];
 }
 
-// 通知：目前有兩種
-// 'stolen' = 呼吸小偷偷了你（from=小偷暱稱, amount=偷了幾隻）
+// 通知：目前有三種
+// 'stolen' = 呼吸小偷偷了你（from=小偷暱稱, amount=偷了幾隻呼吸棒）
 // 'friend_puffing' = 你有加的好友開始抽了（from=好友暱稱）
+// 'robbed' = 有人用呼吸券搶走你的錢（from=搶匪暱稱, amount=搶走幾元）
 interface NotificationEntry {
-  kind: 'stolen' | 'friend_puffing';
+  kind: 'stolen' | 'friend_puffing' | 'robbed';
   from: string;
   amount?: number;
   date: string;
@@ -244,6 +248,12 @@ const BREATH_THIEF_MIN_STEAL = 1;
 const BREATH_THIEF_MAX_STEAL = 50;
 // 道具庫存用的 key
 const TOOL_BREATH_THIEF = 'breathThief';
+
+// 呼吸券：完整抽完一整隻呼吸棒（燒到 0%）就會拿到一張
+// 可以在背包裡使用，去搶朋友的錢，一次搶 100 ~ 200 元之間
+const TOOL_BREATH_VOUCHER = 'breathVoucher';
+const ROB_MIN_AMOUNT = 100;
+const ROB_MAX_AMOUNT = 200;
 
 /* ============================================================
    共用小元件（都定義在同一檔案內，不拆檔）
@@ -1395,11 +1405,6 @@ function ResultScreen({
         </div>
       </Card>
 
-      <Card style={{ width: '100%', maxWidth: 360 }}>
-        <div style={{ color: colors.textPrimary }}>🏅 獲得成就：夜貓子 x1</div>
-        <div style={{ color: colors.textPrimary, marginTop: 4 }}>✨ 好感度 +5（與阿橘）</div>
-      </Card>
-
       <div style={{ display: 'flex', gap: spacing.md, width: '100%', maxWidth: 360, marginTop: spacing.lg }}>
         <button
           onClick={onReplay}
@@ -1726,6 +1731,8 @@ function BackpackScreen({
   friends,
   breathThiefCount,
   onUseBreathThief,
+  breathVoucherCount,
+  onUseBreathVoucher,
   onBack,
   onGoShop,
 }: {
@@ -1733,11 +1740,14 @@ function BackpackScreen({
   friends: string[];
   breathThiefCount: number;
   onUseBreathThief: (targetNickname: string) => void;
+  breathVoucherCount: number;
+  onUseBreathVoucher: (targetNickname: string) => void;
   onBack: () => void;
   onGoShop: () => void;
 }) {
   const totalCount = skins.reduce((sum, s) => sum + s.quantity, 0);
   const [showThiefPicker, setShowThiefPicker] = useState(false);
+  const [showVoucherPicker, setShowVoucherPicker] = useState(false);
 
   return (
     <div style={{ padding: `${spacing.md}px ${spacing.lg}px`, paddingBottom: 100 }}>
@@ -1813,6 +1823,76 @@ function BackpackScreen({
                 >
                   <span style={{ fontSize: 14, color: colors.textPrimary }}>{f}</span>
                   <span style={{ fontSize: 13, color: colors.lavender, fontWeight: 600 }}>偷 TA →</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* 道具：呼吸券 — 完整抽完一支呼吸棒就會拿到一張，可以拿去搶朋友的錢 */}
+      {breathVoucherCount > 0 && (
+        <div
+          style={{
+            background: colors.surface,
+            borderRadius: radius.card,
+            padding: spacing.md,
+            boxShadow: cardShadow,
+            marginBottom: spacing.md,
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: spacing.md }}>
+            <div style={{ fontSize: 32 }}>🎫</div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 16, fontWeight: 600, color: colors.textPrimary }}>呼吸券 x{breathVoucherCount}</div>
+              <div style={{ fontSize: 12, color: colors.textSecondary, marginTop: 2 }}>
+                選一個朋友，搶走他 {ROB_MIN_AMOUNT}～{ROB_MAX_AMOUNT} 元
+              </div>
+            </div>
+            <button
+              onClick={() => setShowVoucherPicker((v) => !v)}
+              style={{
+                padding: '8px 16px',
+                borderRadius: radius.pill,
+                border: 'none',
+                background: colors.lavender,
+                color: colors.textOnColor,
+                fontWeight: 600,
+                fontSize: 13,
+                cursor: 'pointer',
+              }}
+            >
+              使用
+            </button>
+          </div>
+
+          {showVoucherPicker && (
+            <div style={{ marginTop: spacing.md, borderTop: `1px solid ${colors.surfaceMuted}`, paddingTop: spacing.sm }}>
+              {friends.length === 0 && (
+                <div style={{ fontSize: 13, color: colors.textSecondary }}>還沒有好友可以搶，先去首頁加幾個好友吧</div>
+              )}
+              {friends.map((f) => (
+                <button
+                  key={f}
+                  onClick={() => {
+                    onUseBreathVoucher(f);
+                    setShowVoucherPicker(false);
+                  }}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    width: '100%',
+                    padding: '10px 4px',
+                    background: 'none',
+                    border: 'none',
+                    borderBottom: `1px solid ${colors.surfaceMuted}`,
+                    cursor: 'pointer',
+                    textAlign: 'left',
+                  }}
+                >
+                  <span style={{ fontSize: 14, color: colors.textPrimary }}>{f}</span>
+                  <span style={{ fontSize: 13, color: colors.lavender, fontWeight: 600 }}>搶 TA →</span>
                 </button>
               ))}
             </div>
@@ -2095,14 +2175,20 @@ function NotificationsScreen({
             background: n.read ? colors.surface : colors.surfaceMuted,
           }}
         >
-          <div style={{ fontSize: 28 }}>{n.kind === 'stolen' ? '🕵️' : '🥺'}</div>
+          <div style={{ fontSize: 28 }}>{n.kind === 'stolen' ? '🕵️' : n.kind === 'robbed' ? '🤕' : '🥺'}</div>
           <div style={{ flex: 1 }}>
             <div style={{ fontSize: 14, color: colors.textPrimary, lineHeight: 1.5 }}>
-              {n.kind === 'stolen' ? (
+              {n.kind === 'stolen' && (
                 <>
                   小偷 <strong>{n.from}</strong> 偷走了你 <strong style={{ color: colors.danger }}>{n.amount}</strong> 隻呼吸棒，快點去賺錢報復他！
                 </>
-              ) : (
+              )}
+              {n.kind === 'robbed' && (
+                <>
+                  <strong>{n.from}</strong>：「把錢拿來讓我去治病」搶走了你 <strong style={{ color: colors.danger }}>{n.amount}</strong> 元
+                </>
+              )}
+              {n.kind === 'friend_puffing' && (
                 <>
                   <strong>{n.from}</strong> 又在抽了，他真的很可憐🥺
                 </>
@@ -2326,6 +2412,37 @@ async function stealSticksFromFriend(
   return { success: true, stolen };
 }
 
+// 呼吸券：搶朋友的錢，一次搶 100 ~ 200 元之間（受限於對方實際餘額，不會搶到負的）
+// 會直接扣掉對方的零錢包、留一筆通知進對方帳號，再一起存回雲端
+async function robCoinsFromFriend(
+  friendNickname: string,
+  minAmount: number,
+  maxAmount: number,
+  robberNickname: string
+): Promise<{ success: boolean; robbedAmount: number }> {
+  const friendAccount = await fetchAccount(friendNickname);
+  if (!friendAccount) return { success: false, robbedAmount: 0 };
+
+  const friendCoins = friendAccount.coins ?? 0;
+  const targetAmount = Math.floor(minAmount + Math.random() * (maxAmount - minAmount + 1));
+  const robbedAmount = Math.min(targetAmount, friendCoins);
+
+  const newNotifications =
+    robbedAmount > 0
+      ? [
+          { kind: 'robbed' as const, from: robberNickname, amount: robbedAmount, date: formatDateTime(new Date()), read: false },
+          ...(friendAccount.notifications ?? []),
+        ].slice(0, 50)
+      : friendAccount.notifications ?? [];
+
+  await saveAccount(friendNickname, {
+    ...friendAccount,
+    coins: friendCoins - robbedAmount,
+    notifications: newNotifications,
+  });
+  return { success: true, robbedAmount };
+}
+
 // 加好友時：把「我」加進對方帳號的 watchers 清單，這樣對方開抽時才知道要通知我
 async function addWatcherToAccount(targetNickname: string, watcherNickname: string): Promise<void> {
   const targetAccount = await fetchAccount(targetNickname);
@@ -2470,6 +2587,7 @@ export default function App() {
   const [coins, setCoins] = useState<number>(STARTER_COINS);
   const [tools, setTools] = useState<Record<string, number>>({}); // 特殊道具庫存，例如呼吸小偷
   const breathThiefCount = tools[TOOL_BREATH_THIEF] ?? 0;
+  const breathVoucherCount = tools[TOOL_BREATH_VOUCHER] ?? 0;
   const [myComments, setMyComments] = useState<CommentEntry[]>([]); // 別人留在我放空紀錄下面的留言
   const [notifications, setNotifications] = useState<NotificationEntry[]>([]); // 收到的通知：被偷、或好友開抽
   const [watchers, setWatchers] = useState<string[]>([]); // 誰把我加為好友了（我開抽時要通知這些人）
@@ -2648,6 +2766,9 @@ export default function App() {
       ...prev,
       history: [{ date: dateLabel, withWho: '獨自放空', duration: `${minutes}:${seconds}` }, ...prev.history].slice(0, 20),
     }));
+    // 完整抽完一整隻呼吸棒，獎勵一張呼吸券
+    setTools((prev) => ({ ...prev, [TOOL_BREATH_VOUCHER]: (prev[TOOL_BREATH_VOUCHER] ?? 0) + 1 }));
+    setToastMessage('抽完了！獲得一張呼吸券 🎫');
     puffStartTimeRef.current = null;
   };
 
@@ -2813,6 +2934,28 @@ export default function App() {
     }
   };
 
+  // 在背包使用呼吸券：選一個朋友，搶走他 100～200 元，搶到的直接進自己零錢包，
+  // 同時會在對方帳號留下一筆通知：「OOO：把錢拿來讓我去治病」
+  const handleUseBreathVoucher = async (targetNickname: string) => {
+    if (breathVoucherCount <= 0) {
+      setToastMessage('沒有呼吸券了，抽完一整支呼吸棒才會拿到');
+      return;
+    }
+    if (!nickname) return;
+    setTools((prev) => ({ ...prev, [TOOL_BREATH_VOUCHER]: Math.max(0, (prev[TOOL_BREATH_VOUCHER] ?? 0) - 1) }));
+    const result = await robCoinsFromFriend(targetNickname, ROB_MIN_AMOUNT, ROB_MAX_AMOUNT, nickname);
+    if (!result.success) {
+      setToastMessage(`搶劫失敗，找不到「${targetNickname}」的帳號`);
+      return;
+    }
+    if (result.robbedAmount > 0) {
+      setCoins((prev) => prev + result.robbedAmount);
+      setToastMessage(`搶到了 ${result.robbedAmount} 元！`);
+    } else {
+      setToastMessage(`${targetNickname} 的零錢包是空的，什麼都沒搶到`);
+    }
+  };
+
   // 還沒登入：先顯示輸入暱稱畫面
   if (!nickname) {
     return <NicknameScreen onConfirm={handleCreateAccount} />;
@@ -2864,6 +3007,8 @@ export default function App() {
           friends={friends}
           breathThiefCount={breathThiefCount}
           onUseBreathThief={handleUseBreathThief}
+          breathVoucherCount={breathVoucherCount}
+          onUseBreathVoucher={handleUseBreathVoucher}
           onBack={handleBackHome}
           onGoShop={handleGoShop}
         />
