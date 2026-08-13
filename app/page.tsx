@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 
 /* ============================================================
-   Cloud Puff ☁️ — Web 單檔元件版（第十版）
+   Cloud Puff ☁️ — Web 單檔元件版（第十一版）
    直接把這個檔案放到 Next.js 專案的 app/page.tsx（或任一 page）
    即可部署到 Vercel。全部邏輯、樣式、假資料都包在同一個檔案裡，
    使用 styled-jsx（Next.js 內建，免安裝）做動畫與樣式。
@@ -12,6 +12,8 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
    1. 🔔 小鈴噹通知：呼吸小偷偷了誰、偷了幾隻，都會通知被偷的人
    2. 肺部圖示放大（放空紀錄頁）
    3. 歷史紀錄加上「開抽時間」（幾點幾分開始抽）
+   4. 🔔 好友開抽也會收到通知：「OOO 又在抽了，他真的很可憐🥺」
+      （加好友時會順便登記成對方的 watcher，對方開抽時就會通知你）
    ============================================================ */
 
 /* ---------------------- 型別 ---------------------- */
@@ -61,10 +63,13 @@ interface UserStats {
   history: RestHistoryItem[];
 }
 
-// 呼吸小偷偷竊通知：誰偷了你、偷了幾隻、什麼時候
+// 通知：目前有兩種
+// 'stolen' = 呼吸小偷偷了你（from=小偷暱稱, amount=偷了幾隻）
+// 'friend_puffing' = 你有加的好友開始抽了（from=好友暱稱）
 interface NotificationEntry {
+  kind: 'stolen' | 'friend_puffing';
   from: string;
-  amount: number;
+  amount?: number;
   date: string;
   read?: boolean;
 }
@@ -130,7 +135,8 @@ interface AccountRecord {
   coins?: number; // 零錢包餘額（元），大家都從 0 元開始
   comments?: CommentEntry[]; // 別人留在這個帳號放空紀錄下面的留言
   tools?: Record<string, number>; // 特殊道具庫存，例如 breathThief（呼吸小偷）
-  notifications?: NotificationEntry[]; // 被偷通知：誰偷了我、偷了幾隻
+  notifications?: NotificationEntry[]; // 收到的通知：被偷、或好友開抽
+  watchers?: string[]; // 有把「我」加為好友的人的暱稱清單，我開抽時要通知這些人
 }
 
 const mockSkins: SkinData[] = [
@@ -2089,10 +2095,18 @@ function NotificationsScreen({
             background: n.read ? colors.surface : colors.surfaceMuted,
           }}
         >
-          <div style={{ fontSize: 28 }}>🕵️</div>
+          <div style={{ fontSize: 28 }}>{n.kind === 'stolen' ? '🕵️' : '🥺'}</div>
           <div style={{ flex: 1 }}>
             <div style={{ fontSize: 14, color: colors.textPrimary, lineHeight: 1.5 }}>
-              小偷 <strong>{n.from}</strong> 偷走了你 <strong style={{ color: colors.danger }}>{n.amount}</strong> 隻呼吸棒，快點去賺錢報復他！
+              {n.kind === 'stolen' ? (
+                <>
+                  小偷 <strong>{n.from}</strong> 偷走了你 <strong style={{ color: colors.danger }}>{n.amount}</strong> 隻呼吸棒，快點去賺錢報復他！
+                </>
+              ) : (
+                <>
+                  <strong>{n.from}</strong> 又在抽了，他真的很可憐🥺
+                </>
+              )}
             </div>
             <div style={{ fontSize: 12, color: colors.textSecondary, marginTop: 4 }}>{n.date}</div>
           </div>
@@ -2299,7 +2313,7 @@ async function stealSticksFromFriend(
   const newNotifications =
     totalStolen > 0
       ? [
-          { from: thiefNickname, amount: totalStolen, date: formatDateTime(new Date()), read: false },
+          { kind: 'stolen' as const, from: thiefNickname, amount: totalStolen, date: formatDateTime(new Date()), read: false },
           ...(friendAccount.notifications ?? []),
         ].slice(0, 50)
       : friendAccount.notifications ?? [];
@@ -2310,6 +2324,40 @@ async function stealSticksFromFriend(
     notifications: newNotifications,
   });
   return { success: true, stolen };
+}
+
+// 加好友時：把「我」加進對方帳號的 watchers 清單，這樣對方開抽時才知道要通知我
+async function addWatcherToAccount(targetNickname: string, watcherNickname: string): Promise<void> {
+  const targetAccount = await fetchAccount(targetNickname);
+  if (!targetAccount) return;
+  const currentWatchers = targetAccount.watchers ?? [];
+  if (currentWatchers.includes(watcherNickname)) return;
+  await saveAccount(targetNickname, { ...targetAccount, watchers: [...currentWatchers, watcherNickname] });
+}
+
+// 移除好友時：把「我」從對方帳號的 watchers 清單移除，對方開抽就不會再通知我
+async function removeWatcherFromAccount(targetNickname: string, watcherNickname: string): Promise<void> {
+  const targetAccount = await fetchAccount(targetNickname);
+  if (!targetAccount) return;
+  const currentWatchers = targetAccount.watchers ?? [];
+  if (!currentWatchers.includes(watcherNickname)) return;
+  await saveAccount(targetNickname, { ...targetAccount, watchers: currentWatchers.filter((w) => w !== watcherNickname) });
+}
+
+// 開抽的當下，通知所有把我加為好友的人（watchers）：「XXX 又在抽了，他真的很可憐🥺」
+async function notifyWatchersOfPuff(watcherNicknames: string[], puffingNickname: string): Promise<void> {
+  const dateLabel = formatDateTime(new Date());
+  await Promise.all(
+    watcherNicknames.map(async (watcherName) => {
+      const watcherAccount = await fetchAccount(watcherName);
+      if (!watcherAccount) return;
+      const newNotifications = [
+        { kind: 'friend_puffing' as const, from: puffingNickname, date: dateLabel, read: false },
+        ...(watcherAccount.notifications ?? []),
+      ].slice(0, 50);
+      await saveAccount(watcherName, { ...watcherAccount, notifications: newNotifications });
+    })
+  );
 }
 
 function NicknameScreen({ onConfirm }: { onConfirm: (nickname: string, avatarCharacter: CharacterType) => void }) {
@@ -2423,7 +2471,8 @@ export default function App() {
   const [tools, setTools] = useState<Record<string, number>>({}); // 特殊道具庫存，例如呼吸小偷
   const breathThiefCount = tools[TOOL_BREATH_THIEF] ?? 0;
   const [myComments, setMyComments] = useState<CommentEntry[]>([]); // 別人留在我放空紀錄下面的留言
-  const [notifications, setNotifications] = useState<NotificationEntry[]>([]); // 被偷通知：誰偷了我、偷了幾隻
+  const [notifications, setNotifications] = useState<NotificationEntry[]>([]); // 收到的通知：被偷、或好友開抽
+  const [watchers, setWatchers] = useState<string[]>([]); // 誰把我加為好友了（我開抽時要通知這些人）
   const unreadNotificationCount = notifications.filter((n) => !n.read).length;
 
   // 記錄這次「開抽」是什麼時候按下去的，抽完之後歷史紀錄要顯示這個開抽時間
@@ -2471,6 +2520,7 @@ export default function App() {
           setTools(record.tools ?? {});
           setMyComments(record.comments ?? []);
           setNotifications(record.notifications ?? []);
+          setWatchers(record.watchers ?? []);
         } else {
           setAvatarCharacter('cat');
           setQuantities(STARTER_QUANTITIES);
@@ -2480,6 +2530,7 @@ export default function App() {
           setTools({});
           setMyComments([]);
           setNotifications([]);
+          setWatchers([]);
         }
         setNickname(savedNickname);
         setAccountReady(true);
@@ -2500,9 +2551,10 @@ export default function App() {
       tools,
       comments: myComments,
       notifications,
+      watchers,
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [quantities, myStats, avatarCharacter, friends, coins, tools, myComments, notifications, nickname, accountReady]);
+  }, [quantities, myStats, avatarCharacter, friends, coins, tools, myComments, notifications, watchers, nickname, accountReady]);
 
   // 輸入暱稱畫面按下「開始放空」：如果這個暱稱雲端已經有資料就直接讀取，沒有的話幫他建一個新帳號
   const handleCreateAccount = async (name: string, avatar: CharacterType) => {
@@ -2516,6 +2568,7 @@ export default function App() {
       setTools(existing.tools ?? {});
       setMyComments(existing.comments ?? []);
       setNotifications(existing.notifications ?? []);
+      setWatchers(existing.watchers ?? []);
     } else {
       setAvatarCharacter(avatar);
       setQuantities(STARTER_QUANTITIES);
@@ -2525,6 +2578,7 @@ export default function App() {
       setTools({});
       setMyComments([]);
       setNotifications([]);
+      setWatchers([]);
       await saveAccount(name, {
         avatarCharacter: avatar,
         quantities: STARTER_QUANTITIES,
@@ -2534,6 +2588,7 @@ export default function App() {
         tools: {},
         comments: [],
         notifications: [],
+        watchers: [],
       });
     }
     window.localStorage.setItem('cloudpuff_nickname', name);
@@ -2573,6 +2628,10 @@ export default function App() {
       monthRestCount: prev.monthRestCount + 1,
       totalRestCount: prev.totalRestCount + 1,
     }));
+    // 通知所有把我加為好友的人：我開抽了
+    if (nickname && watchers.length > 0) {
+      notifyWatchersOfPuff(watchers, nickname);
+    }
   };
 
   // 真的抽完（燒完一支）：只補上這次的歷史紀錄，次數已經在選呼吸棒當下算過了，這裡不重複加
@@ -2691,10 +2750,12 @@ export default function App() {
     }
     setFriends((prev) => [...prev, name]);
     setFriendProfiles((prev) => ({ ...prev, [name]: record.avatarCharacter }));
+    if (nickname) addWatcherToAccount(name, nickname);
   };
 
   const handleRemoveFriend = (name: string) => {
     setFriends((prev) => prev.filter((f) => f !== name));
+    if (nickname) removeWatcherFromAccount(name, nickname);
   };
 
   // 在好友的放空紀錄頁按「加好友／移除好友」
@@ -2705,6 +2766,7 @@ export default function App() {
     } else {
       setFriends((prev) => [...prev, friendRecord.nickname]);
       setFriendProfiles((prev) => ({ ...prev, [friendRecord.nickname]: friendRecord.record.avatarCharacter }));
+      if (nickname) addWatcherToAccount(friendRecord.nickname, nickname);
     }
   };
 
