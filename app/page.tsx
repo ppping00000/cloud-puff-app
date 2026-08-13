@@ -3,18 +3,15 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 
 /* ============================================================
-   Cloud Puff ☁️ — Web 單檔元件版（第二版）
+   Cloud Puff ☁️ — Web 單檔元件版（第十版）
    直接把這個檔案放到 Next.js 專案的 app/page.tsx（或任一 page）
    即可部署到 Vercel。全部邏輯、樣式、假資料都包在同一個檔案裡，
    使用 styled-jsx（Next.js 內建，免安裝）做動畫與樣式。
 
    本版新增：
-   1. 放空紀錄頁加入「肺部圖示」（抽越多、肺越黑）
-      + 今日 / 本月 / 累積休息次數
-   2. 點好友頭像可以查看好友的完整放空紀錄
-   3. 開抽房：長按越久，放開後吐出的雲越多
-   4. 首頁新增「商城」，可購買呼吸棒（目前全面 0 元）
-   （放空紀錄 / 好友紀錄目前都是假資料，之後再串接真實資料）
+   1. 🔔 小鈴噹通知：呼吸小偷偷了誰、偷了幾隻，都會通知被偷的人
+   2. 肺部圖示放大（放空紀錄頁）
+   3. 歷史紀錄加上「開抽時間」（幾點幾分開始抽）
    ============================================================ */
 
 /* ---------------------- 型別 ---------------------- */
@@ -22,7 +19,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 type CharacterType = 'panda' | 'cat' | 'fox' | 'rabbit';
 type OnlineStatus = 'online' | 'offline' | 'in_room';
 type CharacterState = 'idle' | 'inhale' | 'exhale' | 'relaxed';
-type ScreenName = 'home' | 'puffroom' | 'result' | 'collection' | 'stats' | 'shop' | 'friend' | 'backpack' | 'goodkid' | 'leaderboard';
+type ScreenName = 'home' | 'puffroom' | 'result' | 'collection' | 'stats' | 'shop' | 'friend' | 'backpack' | 'goodkid' | 'leaderboard' | 'notifications';
 
 interface UserData {
   id: string;
@@ -64,6 +61,14 @@ interface UserStats {
   history: RestHistoryItem[];
 }
 
+// 呼吸小偷偷竊通知：誰偷了你、偷了幾隻、什麼時候
+interface NotificationEntry {
+  from: string;
+  amount: number;
+  date: string;
+  read?: boolean;
+}
+
 /* ---------------------- 設計系統 Tokens ---------------------- */
 
 const colors = {
@@ -81,6 +86,7 @@ const colors = {
   background: '#FBFBFF',
   surface: '#FFFFFF',
   surfaceMuted: '#F3F1FF',
+  danger: '#FF6B6B',
 };
 
 const radius = { input: 16, card: 24, modal: 28, pill: 999 };
@@ -94,6 +100,17 @@ const CHARACTER_EMOJI: Record<CharacterType, string> = {
   fox: '🦊',
   rabbit: '🐰',
 };
+
+/* ---------------------- 共用時間格式 ---------------------- */
+
+// 格式化成「月/日 時:分」，用在歷史紀錄（開抽時間）與通知時間
+function formatDateTime(date: Date): string {
+  const month = date.getMonth() + 1;
+  const day = date.getDate();
+  const hh = String(date.getHours()).padStart(2, '0');
+  const mm = String(date.getMinutes()).padStart(2, '0');
+  return `${month}/${day} ${hh}:${mm}`;
+}
 
 /* ---------------------- 假資料 ---------------------- */
 
@@ -113,6 +130,7 @@ interface AccountRecord {
   coins?: number; // 零錢包餘額（元），大家都從 0 元開始
   comments?: CommentEntry[]; // 別人留在這個帳號放空紀錄下面的留言
   tools?: Record<string, number>; // 特殊道具庫存，例如 breathThief（呼吸小偷）
+  notifications?: NotificationEntry[]; // 被偷通知：誰偷了我、偷了幾隻
 }
 
 const mockSkins: SkinData[] = [
@@ -768,11 +786,13 @@ function usePuffRoom(onFinished: (durationSeconds: number) => void, started: boo
 function HomeScreen({
   user,
   coins,
+  unreadNotificationCount,
   onStartPuff,
   onGoCollection,
   onGoShop,
   onGoBackpack,
   onGoLeaderboard,
+  onGoNotifications,
   onViewFriend,
   onAddFriend,
   friends,
@@ -781,11 +801,13 @@ function HomeScreen({
 }: {
   user: UserData;
   coins: number;
+  unreadNotificationCount: number;
   onStartPuff: () => void;
   onGoCollection: () => void;
   onGoShop: () => void;
   onGoBackpack: () => void;
   onGoLeaderboard: () => void;
+  onGoNotifications: () => void;
   onViewFriend: (nickname: string) => void;
   onAddFriend: (nickname: string) => void;
   friends: string[];
@@ -802,7 +824,7 @@ function HomeScreen({
       {/* 頂部 */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: spacing.md }}>
         <h1 style={{ fontSize: 26, fontWeight: 700, color: colors.textPrimary, margin: 0 }}>☁️ Cloud Puff</h1>
-        <div style={{ display: 'flex', gap: spacing.md, fontSize: 20 }}>
+        <div style={{ display: 'flex', gap: spacing.md, fontSize: 20, alignItems: 'center' }}>
           <button onClick={onGoBackpack} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 20, padding: 0 }}>
             🎒
           </button>
@@ -812,7 +834,34 @@ function HomeScreen({
           <button onClick={onGoLeaderboard} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 20, padding: 0 }}>
             🏆
           </button>
-          <span>🔔</span>
+          <button
+            onClick={onGoNotifications}
+            style={{ position: 'relative', background: 'none', border: 'none', cursor: 'pointer', fontSize: 20, padding: 0 }}
+          >
+            🔔
+            {unreadNotificationCount > 0 && (
+              <span
+                style={{
+                  position: 'absolute',
+                  top: -4,
+                  right: -6,
+                  minWidth: 16,
+                  height: 16,
+                  borderRadius: 999,
+                  background: colors.danger,
+                  color: '#FFFFFF',
+                  fontSize: 10,
+                  fontWeight: 700,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  padding: '0 3px',
+                }}
+              >
+                {unreadNotificationCount > 9 ? '9+' : unreadNotificationCount}
+              </span>
+            )}
+          </button>
           <span>⚙️</span>
         </div>
       </div>
@@ -1887,11 +1936,11 @@ function StatsScreen({
         )}
       </div>
 
-      {/* 肺部圖示：累積抽越多，肺會越黑 */}
-      <Card style={{ display: 'flex', alignItems: 'center', gap: spacing.md }}>
-        <LungIcon totalRestCount={stats.totalRestCount} size={84} />
+      {/* 肺部圖示：累積抽越多，肺會越黑（放大顯示） */}
+      <Card style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: spacing.sm, textAlign: 'center' }}>
+        <LungIcon totalRestCount={stats.totalRestCount} size={180} />
         <div>
-          <div style={{ fontSize: 15, fontWeight: 600, color: colors.textPrimary }}>肺部狀態</div>
+          <div style={{ fontSize: 16, fontWeight: 600, color: colors.textPrimary }}>肺部狀態</div>
           <div style={{ fontSize: 13, color: colors.textSecondary, marginTop: 4 }}>
             累積放空 {stats.totalRestCount} 次，抽越多肺會越黑喔
           </div>
@@ -1931,7 +1980,7 @@ function StatsScreen({
               color: colors.textPrimary,
             }}
           >
-            <span style={{ color: colors.textSecondary }}>{h.date}</span>
+            <span style={{ color: colors.textSecondary }}>開抽 {h.date}</span>
             <span>與{h.withWho}</span>
             <span>{h.duration}</span>
           </div>
@@ -1999,6 +2048,56 @@ function StatsScreen({
               </div>
             ))}
         </Card>
+    </div>
+  );
+}
+
+/* ============================================================
+   畫面：通知（小鈴噹）— 誰偷了你、偷了幾隻，什麼時候發生的
+   ============================================================ */
+
+function NotificationsScreen({
+  notifications,
+  onBack,
+}: {
+  notifications: NotificationEntry[];
+  onBack: () => void;
+}) {
+  return (
+    <div style={{ padding: `${spacing.md}px ${spacing.lg}px`, paddingBottom: 100, display: 'flex', flexDirection: 'column', gap: spacing.md }}>
+      <button
+        onClick={onBack}
+        style={{ alignSelf: 'flex-start', background: 'none', border: 'none', fontSize: 15, color: colors.textSecondary, cursor: 'pointer', padding: 0 }}
+      >
+        ← 返回
+      </button>
+      <h1 style={{ fontSize: 24, fontWeight: 700, color: colors.textPrimary, margin: 0 }}>🔔 通知</h1>
+
+      {notifications.length === 0 && (
+        <div style={{ fontSize: 13, color: colors.textSecondary, textAlign: 'center', marginTop: spacing.xl }}>
+          目前還沒有任何通知
+        </div>
+      )}
+
+      {notifications.map((n, idx) => (
+        <Card
+          key={idx}
+          style={{
+            display: 'flex',
+            alignItems: 'flex-start',
+            gap: spacing.sm,
+            background: n.read ? colors.surface : colors.surfaceMuted,
+          }}
+        >
+          <div style={{ fontSize: 28 }}>🕵️</div>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 14, color: colors.textPrimary, lineHeight: 1.5 }}>
+              小偷 <strong>{n.from}</strong> 偷走了你 <strong style={{ color: colors.danger }}>{n.amount}</strong> 隻呼吸棒，快點去賺錢報復他！
+            </div>
+            <div style={{ fontSize: 12, color: colors.textSecondary, marginTop: 4 }}>{n.date}</div>
+          </div>
+        </Card>
+      ))}
     </div>
   );
 }
@@ -2162,11 +2261,13 @@ async function saveAccount(nickname: string, record: AccountRecord): Promise<voi
 }
 
 // 呼吸小偷：去某個朋友的背包裡隨機偷走 1 ~ 50 隻呼吸棒（受限於對方實際擁有的數量）
-// 回傳實際偷到的內容（每款偷了幾隻），並且會直接把朋友那邊的背包扣掉、存回雲端
+// 回傳實際偷到的內容（每款偷了幾隻），並且會直接把朋友那邊的背包扣掉、
+// 存一筆「被偷通知」進對方帳號，再一起存回雲端
 async function stealSticksFromFriend(
   friendNickname: string,
   minSteal: number,
-  maxSteal: number
+  maxSteal: number,
+  thiefNickname: string
 ): Promise<{ success: boolean; stolen: Record<string, number> }> {
   const friendAccount = await fetchAccount(friendNickname);
   if (!friendAccount) return { success: false, stolen: {} };
@@ -2193,7 +2294,21 @@ async function stealSticksFromFriend(
     newFriendQuantities[id] = Math.max(0, (newFriendQuantities[id] ?? 0) - count);
   }
 
-  await saveAccount(friendNickname, { ...friendAccount, quantities: newFriendQuantities });
+  const totalStolen = Object.values(stolen).reduce((a, b) => a + b, 0);
+  // 只有真的偷到東西才發通知給對方
+  const newNotifications =
+    totalStolen > 0
+      ? [
+          { from: thiefNickname, amount: totalStolen, date: formatDateTime(new Date()), read: false },
+          ...(friendAccount.notifications ?? []),
+        ].slice(0, 50)
+      : friendAccount.notifications ?? [];
+
+  await saveAccount(friendNickname, {
+    ...friendAccount,
+    quantities: newFriendQuantities,
+    notifications: newNotifications,
+  });
   return { success: true, stolen };
 }
 
@@ -2308,6 +2423,11 @@ export default function App() {
   const [tools, setTools] = useState<Record<string, number>>({}); // 特殊道具庫存，例如呼吸小偷
   const breathThiefCount = tools[TOOL_BREATH_THIEF] ?? 0;
   const [myComments, setMyComments] = useState<CommentEntry[]>([]); // 別人留在我放空紀錄下面的留言
+  const [notifications, setNotifications] = useState<NotificationEntry[]>([]); // 被偷通知：誰偷了我、偷了幾隻
+  const unreadNotificationCount = notifications.filter((n) => !n.read).length;
+
+  // 記錄這次「開抽」是什麼時候按下去的，抽完之後歷史紀錄要顯示這個開抽時間
+  const puffStartTimeRef = useRef<Date | null>(null);
 
   // 好友頁面現在存整個帳號資料（含留言、庫存），這樣留言／偷竊才能直接改好存回去
   const [friendRecord, setFriendRecord] = useState<{ nickname: string; record: AccountRecord } | null>(null);
@@ -2350,6 +2470,7 @@ export default function App() {
           setCoins(record.coins ?? STARTER_COINS);
           setTools(record.tools ?? {});
           setMyComments(record.comments ?? []);
+          setNotifications(record.notifications ?? []);
         } else {
           setAvatarCharacter('cat');
           setQuantities(STARTER_QUANTITIES);
@@ -2358,6 +2479,7 @@ export default function App() {
           setCoins(STARTER_COINS);
           setTools({});
           setMyComments([]);
+          setNotifications([]);
         }
         setNickname(savedNickname);
         setAccountReady(true);
@@ -2365,13 +2487,22 @@ export default function App() {
     }
   }, []);
 
-  // 資料有變動（背包庫存、放空紀錄、頭像、好友清單、零錢包、道具、收到的留言）就自動存回雲端資料庫，
+  // 資料有變動（背包庫存、放空紀錄、頭像、好友清單、零錢包、道具、收到的留言、通知）就自動存回雲端資料庫，
   // 這樣其他人用你的暱稱查詢時，看到的才是最新的
   useEffect(() => {
     if (!nickname || !accountReady) return;
-    saveAccount(nickname, { avatarCharacter, quantities, stats: myStats, friends, coins, tools, comments: myComments });
+    saveAccount(nickname, {
+      avatarCharacter,
+      quantities,
+      stats: myStats,
+      friends,
+      coins,
+      tools,
+      comments: myComments,
+      notifications,
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [quantities, myStats, avatarCharacter, friends, coins, tools, myComments, nickname, accountReady]);
+  }, [quantities, myStats, avatarCharacter, friends, coins, tools, myComments, notifications, nickname, accountReady]);
 
   // 輸入暱稱畫面按下「開始放空」：如果這個暱稱雲端已經有資料就直接讀取，沒有的話幫他建一個新帳號
   const handleCreateAccount = async (name: string, avatar: CharacterType) => {
@@ -2384,6 +2515,7 @@ export default function App() {
       setCoins(existing.coins ?? STARTER_COINS);
       setTools(existing.tools ?? {});
       setMyComments(existing.comments ?? []);
+      setNotifications(existing.notifications ?? []);
     } else {
       setAvatarCharacter(avatar);
       setQuantities(STARTER_QUANTITIES);
@@ -2392,6 +2524,7 @@ export default function App() {
       setCoins(STARTER_COINS);
       setTools({});
       setMyComments([]);
+      setNotifications([]);
       await saveAccount(name, {
         avatarCharacter: avatar,
         quantities: STARTER_QUANTITIES,
@@ -2400,6 +2533,7 @@ export default function App() {
         coins: STARTER_COINS,
         tools: {},
         comments: [],
+        notifications: [],
       });
     }
     window.localStorage.setItem('cloudpuff_nickname', name);
@@ -2429,7 +2563,9 @@ export default function App() {
   const handleStartPuff = () => setScreen('puffroom');
 
   // 一選定呼吸棒（鎖定、開始抽）就立刻生效：背包那隻 -1、今日/本月/累積休息次數各 +1
+  // 同時記錄下這次「開抽」的時間，抽完後歷史紀錄要顯示這個時間
   const handleConfirmSkin = (skinId: string) => {
+    puffStartTimeRef.current = new Date();
     setQuantities((prev) => ({ ...prev, [skinId]: Math.max(0, (prev[skinId] ?? 0) - 1) }));
     setMyStats((prev) => ({
       ...prev,
@@ -2440,18 +2576,20 @@ export default function App() {
   };
 
   // 真的抽完（燒完一支）：只補上這次的歷史紀錄，次數已經在選呼吸棒當下算過了，這裡不重複加
+  // 歷史紀錄的時間用「開抽當下」的時間，不是燒完的時間
   const handlePuffFinished = (durationSeconds: number) => {
     setLastDuration(durationSeconds);
     setScreen('result');
 
-    const now = new Date();
-    const dateLabel = `${now.getMonth() + 1}/${now.getDate()}`;
+    const startTime = puffStartTimeRef.current ?? new Date();
+    const dateLabel = formatDateTime(startTime);
     const minutes = String(Math.floor(durationSeconds / 60)).padStart(2, '0');
     const seconds = String(durationSeconds % 60).padStart(2, '0');
     setMyStats((prev) => ({
       ...prev,
       history: [{ date: dateLabel, withWho: '獨自放空', duration: `${minutes}:${seconds}` }, ...prev.history].slice(0, 20),
     }));
+    puffStartTimeRef.current = null;
   };
 
   const handleExitRoom = () => {
@@ -2469,6 +2607,11 @@ export default function App() {
   };
   const handleGoShop = () => setScreen('shop');
   const handleGoBackpack = () => setScreen('backpack');
+  // 打開通知頁：進去看的當下，把目前的通知都標記為已讀
+  const handleGoNotifications = () => {
+    setScreen('notifications');
+    setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+  };
   // 打開排行榜：把自己跟所有好友的最新累積休息次數都抓一次
   const handleGoLeaderboard = async () => {
     setScreen('leaderboard');
@@ -2568,8 +2711,7 @@ export default function App() {
   // 在朋友的放空紀錄下面留言：存到對方帳號的留言清單，自己則賺 COMMENT_COIN_REWARD 元
   const handleSubmitComment = async (text: string) => {
     if (!friendRecord || !nickname) return;
-    const now = new Date();
-    const dateLabel = `${now.getMonth() + 1}/${now.getDate()}`;
+    const dateLabel = formatDateTime(new Date());
     const newComment: CommentEntry = { from: nickname, text, date: dateLabel };
     const updatedRecord: AccountRecord = {
       ...friendRecord.record,
@@ -2580,14 +2722,16 @@ export default function App() {
     setCoins((prev) => prev + COMMENT_COIN_REWARD);
   };
 
-  // 在背包使用呼吸小偷：選一個朋友，隨機偷走他 1～50 隻呼吸棒，偷到的直接進自己背包
+  // 在背包使用呼吸小偷：選一個朋友，隨機偷走他 1～50 隻呼吸棒，偷到的直接進自己背包，
+  // 同時會在對方帳號留下一筆通知，讓他知道是誰偷的、偷了幾隻
   const handleUseBreathThief = async (targetNickname: string) => {
     if (breathThiefCount <= 0) {
       setToastMessage('沒有呼吸小偷了，先去商城買一個');
       return;
     }
+    if (!nickname) return;
     setTools((prev) => ({ ...prev, [TOOL_BREATH_THIEF]: Math.max(0, (prev[TOOL_BREATH_THIEF] ?? 0) - 1) }));
-    const result = await stealSticksFromFriend(targetNickname, BREATH_THIEF_MIN_STEAL, BREATH_THIEF_MAX_STEAL);
+    const result = await stealSticksFromFriend(targetNickname, BREATH_THIEF_MIN_STEAL, BREATH_THIEF_MAX_STEAL, nickname);
     if (!result.success) {
       setToastMessage(`偷竊失敗，找不到「${targetNickname}」的帳號`);
       return;
@@ -2637,11 +2781,13 @@ export default function App() {
         <HomeScreen
           user={displayUser}
           coins={coins}
+          unreadNotificationCount={unreadNotificationCount}
           onStartPuff={handleStartPuff}
           onGoCollection={() => handleTabChange('collection')}
           onGoShop={handleGoShop}
           onGoBackpack={handleGoBackpack}
           onGoLeaderboard={handleGoLeaderboard}
+          onGoNotifications={handleGoNotifications}
           onViewFriend={handleSearchFriend}
           onAddFriend={handleAddFriend}
           friends={friends}
@@ -2688,6 +2834,9 @@ export default function App() {
       {screen === 'goodkid' && <GoodKidGameScreen coins={coins} onEarnCoin={handleEarnCoin} />}
       {screen === 'leaderboard' && (
         <LeaderboardScreen entries={leaderboardEntries} loading={leaderboardLoading} onBack={handleBackHome} />
+      )}
+      {screen === 'notifications' && (
+        <NotificationsScreen notifications={notifications} onBack={handleBackHome} />
       )}
       {screen === 'puffroom' && (
         <PuffRoomScreen
