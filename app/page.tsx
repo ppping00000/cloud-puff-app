@@ -24,7 +24,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 type CharacterType = 'panda' | 'cat' | 'fox' | 'rabbit';
 type OnlineStatus = 'online' | 'offline' | 'in_room';
 type CharacterState = 'idle' | 'inhale' | 'exhale' | 'relaxed';
-type ScreenName = 'home' | 'puffroom' | 'result' | 'collection' | 'stats' | 'shop' | 'friend' | 'backpack' | 'goodkid' | 'leaderboard' | 'notifications';
+type ScreenName = 'home' | 'puffroom' | 'result' | 'stats' | 'shop' | 'friend' | 'backpack' | 'goodkid' | 'leaderboard' | 'notifications';
 
 interface UserData {
   id: string;
@@ -921,7 +921,6 @@ function HomeScreen({
   coins,
   unreadNotificationCount,
   onStartPuff,
-  onGoCollection,
   onGoShop,
   onGoBackpack,
   onGoNotifications,
@@ -935,7 +934,6 @@ function HomeScreen({
   coins: number;
   unreadNotificationCount: number;
   onStartPuff: () => void;
-  onGoCollection: () => void;
   onGoShop: () => void;
   onGoBackpack: () => void;
   onGoNotifications: () => void;
@@ -1134,33 +1132,6 @@ function HomeScreen({
           </button>
         </div>
       )}
-
-      {/* 收藏預覽 */}
-      <SectionHeader title="我的呼吸棒收藏" onPressMore={onGoCollection} />
-      <div style={{ display: 'flex', gap: spacing.sm }}>
-        {skins.slice(0, 5).map((skin) => {
-          const owned = skin.quantity > 0;
-          return (
-            <div
-              key={skin.id}
-              style={{
-                width: 56,
-                height: 56,
-                borderRadius: radius.card - 8,
-                background: owned ? skin.bodyFill : colors.surfaceMuted,
-                opacity: owned ? 1 : 0.5,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                fontSize: 20,
-                border: owned ? `4px solid ${skin.handleColor}` : 'none',
-              }}
-            >
-              {owned ? skin.tipEmoji : '🔒'}
-            </div>
-          );
-        })}
-      </div>
 
     </div>
   );
@@ -1455,63 +1426,6 @@ function ResultScreen({
         >
           返回主頁
         </button>
-      </div>
-    </div>
-  );
-}
-
-/* ============================================================
-   畫面：收藏頁
-   ============================================================ */
-
-function CollectionScreen({ skins, onBack }: { skins: SkinData[]; onBack: () => void }) {
-  return (
-    <div style={{ padding: `${spacing.md}px ${spacing.lg}px`, paddingBottom: 100 }}>
-      <button
-        onClick={onBack}
-        style={{ background: 'none', border: 'none', fontSize: 15, color: colors.textSecondary, cursor: 'pointer', padding: 0, marginBottom: spacing.sm }}
-      >
-        ← 返回
-      </button>
-      <h1 style={{ fontSize: 24, fontWeight: 700, color: colors.textPrimary, marginBottom: spacing.md }}>☁️ 我的呼吸棒收藏</h1>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: spacing.md }}>
-        {skins.map((skin) => {
-          const owned = skin.quantity > 0;
-          return (
-            <div
-              key={skin.id}
-              style={{
-                background: colors.surface,
-                borderRadius: radius.card,
-                padding: spacing.md,
-                textAlign: 'center',
-                boxShadow: cardShadow,
-                opacity: owned ? 1 : 0.55,
-              }}
-            >
-              <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: 40, position: 'relative' }}>
-                {owned ? (
-                  <CloudCandleStick
-                    progress={100}
-                    width={110}
-                    height={32}
-                    handleColor={skin.handleColor}
-                    handleStroke={skin.handleStroke}
-                    bodyFill={skin.bodyFill}
-                    bodyStroke={skin.bodyStroke}
-                    tipEmoji={skin.tipEmoji}
-                  />
-                ) : (
-                  <span style={{ fontSize: 24 }}>🔒</span>
-                )}
-              </div>
-              <div style={{ fontSize: 16, fontWeight: 600, color: colors.textPrimary, marginTop: 8 }}>{skin.name}</div>
-              <div style={{ fontSize: 13, color: colors.textSecondary }}>
-                {owned ? `背包庫存 x${skin.quantity}` : '尚未擁有，去商城兌換'}
-              </div>
-            </div>
-          );
-        })}
       </div>
     </div>
   );
@@ -2383,7 +2297,7 @@ function NotificationsScreen({
             <div style={{ fontSize: 14, color: colors.textPrimary, lineHeight: 1.5 }}>
               {n.kind === 'stolen' && (
                 <>
-                  小偷 <strong>{n.from}</strong> 偷走了你 <strong style={{ color: colors.danger }}>{n.amount}</strong> 隻呼吸棒，快點去賺錢報復他！
+                  小偷 <strong>{n.from}</strong> 偷走了你 <strong style={{ color: colors.danger }}>{n.amount}</strong> 隻呼吸棒，真是個可憐的菸蟲
                 </>
               )}
               {n.kind === 'robbed' && (
@@ -3052,7 +2966,6 @@ export default function App() {
   };
   const handleGoShop = () => setScreen('shop');
   const handleGoBackpack = () => setScreen('backpack');
-  const handleGoCollection = () => setScreen('collection');
   // 打開通知頁：進去看的當下，把目前的通知都標記為已讀
   const handleGoNotifications = () => {
     setScreen('notifications');
@@ -3288,7 +3201,6 @@ export default function App() {
           coins={coins}
           unreadNotificationCount={unreadNotificationCount}
           onStartPuff={handleStartPuff}
-          onGoCollection={handleGoCollection}
           onGoShop={handleGoShop}
           onGoBackpack={handleGoBackpack}
           onGoNotifications={handleGoNotifications}
@@ -3299,7 +3211,6 @@ export default function App() {
           skins={skins}
         />
       )}
-      {screen === 'collection' && <CollectionScreen skins={skins} onBack={handleBackHome} />}
       {screen === 'backpack' && (
         <BackpackScreen
           skins={skins}
