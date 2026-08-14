@@ -3,15 +3,14 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 
 /* ============================================================
-   Cloud Puff ☁️ — Web 單檔元件版（第十五版）
+   Cloud Puff ☁️ — Web 單檔元件版（第十六版）
    直接把這個檔案放到 Next.js 專案的 app/page.tsx（或任一 page）
    即可部署到 Vercel。全部邏輯、樣式、假資料都包在同一個檔案裡，
    使用 styled-jsx（Next.js 內建，免安裝）做動畫與樣式。
 
-   本版修正：
-   10. 修正「今日休息」「本月休息」次數不會每日/每月歸零的問題：
-       現在會記錄上次開抽的日期，日期不同就自動歸零重算，
-       累積次數（totalRestCount）維持不變、不受影響。
+   本版新增：
+   11. 放空紀錄頁（自己跟朋友都適用）新增等級／稱號卡片，
+       依累積放空次數即時計算 Lv 跟稱號，點好友頭像進去就看得到。
 
    （其餘功能同上一版，詳見各段落內的中文註解）
    ============================================================ */
@@ -2117,6 +2116,32 @@ function StatsScreen({
           </button>
         )}
       </div>
+
+      {/* 等級／稱號：依累積放空次數計算，自己跟朋友的頁面都會顯示 */}
+      {(() => {
+        const levelInfo = computeLevelInfo(stats.totalRestCount);
+        return (
+          <Card style={{ display: 'flex', alignItems: 'center', gap: spacing.sm }}>
+            <span
+              style={{
+                background: colors.mintGreen,
+                borderRadius: 999,
+                padding: '4px 12px',
+                fontSize: 14,
+                fontWeight: 700,
+                color: colors.textPrimary,
+                flexShrink: 0,
+              }}
+            >
+              Lv.{levelInfo.level}
+            </span>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 15, fontWeight: 700, color: colors.textPrimary }}>{levelInfo.title}</div>
+              <div style={{ fontSize: 12, color: colors.textSecondary, marginTop: 2 }}>{levelInfo.note}</div>
+            </div>
+          </Card>
+        );
+      })()}
 
       {/* 肺部圖示：黑化點數越高，肺會越黑（放大顯示） */}
       <Card style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: spacing.sm, textAlign: 'center' }}>
