@@ -883,7 +883,6 @@ function HomeScreen({
   onGoCollection,
   onGoShop,
   onGoBackpack,
-  onGoLeaderboard,
   onGoNotifications,
   onViewFriend,
   onAddFriend,
@@ -898,7 +897,6 @@ function HomeScreen({
   onGoCollection: () => void;
   onGoShop: () => void;
   onGoBackpack: () => void;
-  onGoLeaderboard: () => void;
   onGoNotifications: () => void;
   onViewFriend: (nickname: string) => void;
   onAddFriend: (nickname: string) => void;
@@ -922,9 +920,6 @@ function HomeScreen({
           </button>
           <button onClick={onGoShop} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 20, padding: 0 }}>
             🛍️
-          </button>
-          <button onClick={onGoLeaderboard} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 20, padding: 0 }}>
-            🏆
           </button>
           <button
             onClick={onGoNotifications}
@@ -1126,81 +1121,6 @@ function HomeScreen({
         })}
       </div>
 
-      {/* 背包預覽：每隻呼吸棒目前的庫存數量 */}
-      <SectionHeader title="🎒 我的背包" onPressMore={onGoBackpack} />
-      <div style={{ display: 'flex', gap: spacing.sm, overflowX: 'auto', paddingBottom: spacing.xs }}>
-        {skins.map((skin) => (
-          <button
-            key={skin.id}
-            onClick={onGoBackpack}
-            style={{
-              flexShrink: 0,
-              width: 78,
-              background: colors.surface,
-              borderRadius: radius.card - 8,
-              padding: spacing.sm,
-              boxShadow: cardShadow,
-              border: 'none',
-              cursor: 'pointer',
-              textAlign: 'center',
-              opacity: skin.quantity > 0 ? 1 : 0.5,
-            }}
-          >
-            <div style={{ fontSize: 22 }}>{skin.tipEmoji}</div>
-            <div
-              style={{
-                fontSize: 11,
-                color: colors.textPrimary,
-                marginTop: 2,
-                whiteSpace: 'nowrap',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-              }}
-            >
-              {skin.name}
-            </div>
-            <div style={{ fontSize: 13, fontWeight: 700, color: colors.lavender, marginTop: 2 }}>x{skin.quantity}</div>
-          </button>
-        ))}
-      </div>
-
-      {/* 商城預覽 */}
-      <SectionHeader title="🛍️ 商城" onPressMore={onGoShop} />
-      <div style={{ display: 'flex', gap: spacing.sm, overflowX: 'auto', paddingBottom: spacing.xs }}>
-        {skins.slice(0, 4).map((skin) => (
-          <button
-            key={skin.id}
-            onClick={onGoShop}
-            style={{
-              flexShrink: 0,
-              width: 96,
-              background: colors.surface,
-              borderRadius: radius.card - 8,
-              padding: spacing.sm,
-              boxShadow: cardShadow,
-              border: 'none',
-              cursor: 'pointer',
-              textAlign: 'center',
-            }}
-          >
-            <div style={{ fontSize: 24 }}>{skin.tipEmoji}</div>
-            <div
-              style={{
-                fontSize: 12,
-                fontWeight: 600,
-                color: colors.textPrimary,
-                marginTop: 4,
-                whiteSpace: 'nowrap',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-              }}
-            >
-              {skin.name}
-            </div>
-            <div style={{ fontSize: 12, color: '#5FBF9F', fontWeight: 700, marginTop: 2 }}>{skin.price} 元</div>
-          </button>
-        ))}
-      </div>
     </div>
   );
 }
@@ -3299,7 +3219,6 @@ export default function App() {
           onGoCollection={handleGoCollection}
           onGoShop={handleGoShop}
           onGoBackpack={handleGoBackpack}
-          onGoLeaderboard={handleGoLeaderboard}
           onGoNotifications={handleGoNotifications}
           onViewFriend={handleSearchFriend}
           onAddFriend={handleAddFriend}
