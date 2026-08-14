@@ -3,14 +3,18 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 
 /* ============================================================
-   Cloud Puff ☁️ — Web 單檔元件版（第十六版）
+   Cloud Puff ☁️ — Web 單檔元件版（第十七版）
    直接把這個檔案放到 Next.js 專案的 app/page.tsx（或任一 page）
    即可部署到 Vercel。全部邏輯、樣式、假資料都包在同一個檔案裡，
    使用 styled-jsx（Next.js 內建，免安裝）做動畫與樣式。
 
-   本版新增：
-   11. 放空紀錄頁（自己跟朋友都適用）新增等級／稱號卡片，
-       依累積放空次數即時計算 Lv 跟稱號，點好友頭像進去就看得到。
+   本版重寫「今日／本月休息」的計算方式：
+   12. 不再用會忘記歸零的累加計數器，改成每次開抽都記一筆完整時間戳記
+       （puffTimestamps），今日／本月次數永遠是即時從這份時間清單算出來的，
+       不會有算錯或忘記歸零的問題。
+   13. 自動搬遷舊資料：帳號第一次讀取時，如果偵測到還是舊制、沒有時間戳記，
+       會用「歷史紀錄」裡本來就記著的每次開抽日期時間，反推出對應的時間戳記，
+       所以改版前抽的紀錄也會正確被算進當時的今日／本月次數。
 
    （其餘功能同上一版，詳見各段落內的中文註解）
    ============================================================ */
@@ -56,11 +60,11 @@ interface RestHistoryItem {
 }
 
 interface UserStats {
-  todayRestCount: number;
-  monthRestCount: number;
   totalRestCount: number;
   history: RestHistoryItem[];
-  lastRestDateKey?: string; // 上次開抽的日期（YYYY-MM-DD），用來判斷今日/本月次數要不要歸零
+  // 每次「開抽」當下的完整時間戳記（ISO 格式），今日/本月次數都是即時從這份清單算出來的，
+  // 不再用會忘記歸零的累加計數器。只保留最近一段時間的紀錄就夠算今日/本月了。
+  puffTimestamps?: string[];
 }
 
 // 通知：目前有五種
@@ -183,18 +187,47 @@ function getDateKey(date: Date): string {
   return `${y}-${m}-${d}`;
 }
 
-// 把讀到的放空紀錄「校正到現在」：如果上次開抽不是今天，今日次數歸零；
-// 如果上次開抽不是這個月，本月次數也歸零。累積次數（totalRestCount）永遠不會歸零。
-function normalizeStatsForNow(stats: UserStats): UserStats {
-  const todayKey = getDateKey(new Date());
-  const lastKey = stats.lastRestDateKey;
-  const sameDay = lastKey === todayKey;
-  const sameMonth = !!lastKey && lastKey.slice(0, 7) === todayKey.slice(0, 7);
-  return {
-    ...stats,
-    todayRestCount: sameDay ? stats.todayRestCount : 0,
-    monthRestCount: sameMonth ? stats.monthRestCount : 0,
-  };
+// 舊版歷史紀錄只存「M/D HH:MM」（沒有年份），把它還原成完整日期時間，
+// 用來把「改版前抽的那些」也正確算進今日/本月。假設是今年；如果算出來的時間
+// 比現在晚超過 2 天（代表其實是去年跨年前抽的），就自動退回去年。
+function parseLegacyDateLabel(label: string): Date | null {
+  const match = label.match(/^(\d{1,2})\/(\d{1,2})\s+(\d{2}):(\d{2})$/);
+  if (!match) return null;
+  const [, mm, dd, hh, min] = match;
+  const now = new Date();
+  const guess = new Date(now.getFullYear(), parseInt(mm, 10) - 1, parseInt(dd, 10), parseInt(hh, 10), parseInt(min, 10));
+  if (guess.getTime() - now.getTime() > 1000 * 60 * 60 * 24 * 2) {
+    guess.setFullYear(guess.getFullYear() - 1);
+  }
+  return guess;
+}
+
+// 從「開抽時間戳記」清單即時算出今日／本月次數（不是存好的累加數字，所以永遠不會忘記歸零）
+function computeTodayAndMonthCounts(puffTimestamps: string[]): { today: number; month: number } {
+  const now = new Date();
+  const todayKey = getDateKey(now);
+  const monthKey = todayKey.slice(0, 7);
+  let today = 0;
+  let month = 0;
+  for (const ts of puffTimestamps) {
+    const d = new Date(ts);
+    if (isNaN(d.getTime())) continue;
+    const key = getDateKey(d);
+    if (key === todayKey) today++;
+    if (key.slice(0, 7) === monthKey) month++;
+  }
+  return { today, month };
+}
+
+// 一次性搬遷：改版前的帳號沒有 puffTimestamps，用舊的「歷史紀錄」（裡面本來就記著
+// 每次開抽的日期時間）反推出過去的時間戳記，這樣改版前抽的也會被正確算進今日/本月。
+function migrateStatsToTimeSystem(stats: UserStats): UserStats {
+  if (stats.puffTimestamps && stats.puffTimestamps.length > 0) return stats;
+  const derived = stats.history
+    .map((h) => parseLegacyDateLabel(h.date))
+    .filter((d): d is Date => d !== null)
+    .map((d) => d.toISOString());
+  return { ...stats, puffTimestamps: derived };
 }
 
 /* ---------------------- 假資料 ---------------------- */
@@ -298,10 +331,9 @@ const STARTER_QUANTITIES: Record<string, number> = Object.fromEntries(mockSkins.
 
 // 全新帳號一開始的放空紀錄（都從 0 開始）
 const STARTER_STATS: UserStats = {
-  todayRestCount: 0,
-  monthRestCount: 0,
   totalRestCount: 0,
   history: [],
+  puffTimestamps: [],
 };
 
 // 全新帳號一開始的零錢包餘額
@@ -2197,21 +2229,26 @@ function StatsScreen({
         )}
       </Card>
 
-      {/* 今日 / 本月 / 累積休息次數 */}
-      <div style={{ display: 'flex', gap: spacing.sm }}>
-        <Card style={{ flex: 1, textAlign: 'center' }}>
-          <div style={{ fontSize: 13, color: colors.textSecondary }}>今日休息</div>
-          <div style={{ fontSize: 20, fontWeight: 700, color: colors.textPrimary, marginTop: 4 }}>{stats.todayRestCount} 次</div>
-        </Card>
-        <Card style={{ flex: 1, textAlign: 'center' }}>
-          <div style={{ fontSize: 13, color: colors.textSecondary }}>本月休息</div>
-          <div style={{ fontSize: 20, fontWeight: 700, color: colors.textPrimary, marginTop: 4 }}>{stats.monthRestCount} 次</div>
-        </Card>
-        <Card style={{ flex: 1, textAlign: 'center' }}>
-          <div style={{ fontSize: 13, color: colors.textSecondary }}>累積休息</div>
-          <div style={{ fontSize: 20, fontWeight: 700, color: colors.textPrimary, marginTop: 4 }}>{stats.totalRestCount} 次</div>
-        </Card>
-      </div>
+      {/* 今日 / 本月 / 累積休息次數：今日、本月都是即時從開抽時間戳記算出來的 */}
+      {(() => {
+        const { today, month } = computeTodayAndMonthCounts(stats.puffTimestamps ?? []);
+        return (
+          <div style={{ display: 'flex', gap: spacing.sm }}>
+            <Card style={{ flex: 1, textAlign: 'center' }}>
+              <div style={{ fontSize: 13, color: colors.textSecondary }}>今日休息</div>
+              <div style={{ fontSize: 20, fontWeight: 700, color: colors.textPrimary, marginTop: 4 }}>{today} 次</div>
+            </Card>
+            <Card style={{ flex: 1, textAlign: 'center' }}>
+              <div style={{ fontSize: 13, color: colors.textSecondary }}>本月休息</div>
+              <div style={{ fontSize: 20, fontWeight: 700, color: colors.textPrimary, marginTop: 4 }}>{month} 次</div>
+            </Card>
+            <Card style={{ flex: 1, textAlign: 'center' }}>
+              <div style={{ fontSize: 13, color: colors.textSecondary }}>累積休息</div>
+              <div style={{ fontSize: 20, fontWeight: 700, color: colors.textPrimary, marginTop: 4 }}>{stats.totalRestCount} 次</div>
+            </Card>
+          </div>
+        );
+      })()}
 
       <Card>
         <div style={{ fontSize: 20, fontWeight: 600, color: colors.textPrimary, marginBottom: spacing.sm }}>歷史紀錄</div>
@@ -2845,7 +2882,7 @@ export default function App() {
         if (record) {
           setAvatarCharacter(record.avatarCharacter);
           setQuantities(record.quantities);
-          setMyStats(normalizeStatsForNow(record.stats));
+          setMyStats(migrateStatsToTimeSystem(record.stats));
           setFriends(record.friends ?? []);
           setCoins(record.coins ?? STARTER_COINS);
           setTools(record.tools ?? {});
@@ -2896,7 +2933,7 @@ export default function App() {
     if (existing) {
       setAvatarCharacter(existing.avatarCharacter);
       setQuantities(existing.quantities);
-      setMyStats(normalizeStatsForNow(existing.stats));
+      setMyStats(migrateStatsToTimeSystem(existing.stats));
       setFriends(existing.friends ?? []);
       setCoins(existing.coins ?? STARTER_COINS);
       setTools(existing.tools ?? {});
@@ -2960,18 +2997,11 @@ export default function App() {
     const now = new Date();
     puffStartTimeRef.current = now;
     setQuantities((prev) => ({ ...prev, [skinId]: Math.max(0, (prev[skinId] ?? 0) - 1) }));
-    setMyStats((prev) => {
-      const todayKey = getDateKey(now);
-      const sameDay = prev.lastRestDateKey === todayKey;
-      const sameMonth = !!prev.lastRestDateKey && prev.lastRestDateKey.slice(0, 7) === todayKey.slice(0, 7);
-      return {
-        ...prev,
-        todayRestCount: (sameDay ? prev.todayRestCount : 0) + 1,
-        monthRestCount: (sameMonth ? prev.monthRestCount : 0) + 1,
-        totalRestCount: prev.totalRestCount + 1,
-        lastRestDateKey: todayKey,
-      };
-    });
+    setMyStats((prev) => ({
+      ...prev,
+      totalRestCount: prev.totalRestCount + 1,
+      puffTimestamps: [now.toISOString(), ...(prev.puffTimestamps ?? [])].slice(0, 500),
+    }));
     setLungBlackenPoints((prev) => prev + 1);
     // 通知所有把我加為好友的人：我開抽了
     if (nickname && watchers.length > 0) {
@@ -3078,7 +3108,7 @@ export default function App() {
     setToastMessage(null);
     const record = await fetchAccount(searchName);
     if (record) {
-      setFriendRecord({ nickname: searchName, record: { ...record, stats: normalizeStatsForNow(record.stats) } });
+      setFriendRecord({ nickname: searchName, record: { ...record, stats: migrateStatsToTimeSystem(record.stats) } });
       setScreen('friend');
     } else {
       setToastMessage(`找不到暱稱「${searchName}」的放空紀錄，對方可能還沒開始玩`);
