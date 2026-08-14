@@ -3,30 +3,17 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 
 /* ============================================================
-   Cloud Puff ☁️ — Web 單檔元件版（第十四版）
+   Cloud Puff ☁️ — Web 單檔元件版（第十五版）
    直接把這個檔案放到 Next.js 專案的 app/page.tsx（或任一 page）
    即可部署到 Vercel。全部邏輯、樣式、假資料都包在同一個檔案裡，
    使用 styled-jsx（Next.js 內建，免安裝）做動畫與樣式。
 
-   本版新增：
-   1. 🔔 小鈴噹通知：呼吸小偷偷了誰、偷了幾隻，都會通知被偷的人
-   2. 肺部圖示放大（放空紀錄頁）
-   3. 歷史紀錄加上「開抽時間」（幾點幾分開始抽）
-   4. 🔔 好友開抽也會收到通知：「OOO 又在抽了，他真的很可憐🥺」
-      （加好友時會順便登記成對方的 watcher，對方開抽時就會通知你）
-   5. 🎫 呼吸券：完整抽完一整支呼吸棒就會拿到一張，可以在背包使用，
-      搶朋友的錢（一次 100～200 元），對方會收到通知：
-      「OOO：把錢拿來讓我去治病」
-   6. 結算頁移除成就／好感度區塊
-   7. 底部導覽列改成：首頁／小遊戲／排行／個人檔案
-      （「我的呼吸棒收藏」改成從首頁連結進入的子頁面，不再是分頁）
-   8. 新增等級／稱號系統，依累積放空次數計算：
-      Lv.1~9 每5隻、Lv.10~19 每10隻、Lv.20~29 每20隻、
-      Lv.30~39 每30隻、Lv.40~49 每50隻、Lv.50（封頂）累積1200隻
-   9. 🫁 幫他洗肺／☁️ 送他二手雲：朋友的放空紀錄頁可以幫他洗肺
-      （不限次數，每次 -1 黑化點數），或用「黑雲」道具惡搞他
-      （每抽完一支呼吸棒送一朵，使用後對方 +1 黑化點數）。
-      肺部黑化點數獨立於累積抽菸次數，只受這兩個互動影響。
+   本版修正：
+   10. 修正「今日休息」「本月休息」次數不會每日/每月歸零的問題：
+       現在會記錄上次開抽的日期，日期不同就自動歸零重算，
+       累積次數（totalRestCount）維持不變、不受影響。
+
+   （其餘功能同上一版，詳見各段落內的中文註解）
    ============================================================ */
 
 /* ---------------------- 型別 ---------------------- */
@@ -74,6 +61,7 @@ interface UserStats {
   monthRestCount: number;
   totalRestCount: number;
   history: RestHistoryItem[];
+  lastRestDateKey?: string; // 上次開抽的日期（YYYY-MM-DD），用來判斷今日/本月次數要不要歸零
 }
 
 // 通知：目前有五種
@@ -186,6 +174,28 @@ function formatDateTime(date: Date): string {
   const hh = String(date.getHours()).padStart(2, '0');
   const mm = String(date.getMinutes()).padStart(2, '0');
   return `${month}/${day} ${hh}:${mm}`;
+}
+
+// 格式化成「YYYY-MM-DD」，用來判斷「今天」是不是同一天（本地時區）
+function getDateKey(date: Date): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+// 把讀到的放空紀錄「校正到現在」：如果上次開抽不是今天，今日次數歸零；
+// 如果上次開抽不是這個月，本月次數也歸零。累積次數（totalRestCount）永遠不會歸零。
+function normalizeStatsForNow(stats: UserStats): UserStats {
+  const todayKey = getDateKey(new Date());
+  const lastKey = stats.lastRestDateKey;
+  const sameDay = lastKey === todayKey;
+  const sameMonth = !!lastKey && lastKey.slice(0, 7) === todayKey.slice(0, 7);
+  return {
+    ...stats,
+    todayRestCount: sameDay ? stats.todayRestCount : 0,
+    monthRestCount: sameMonth ? stats.monthRestCount : 0,
+  };
 }
 
 /* ---------------------- 假資料 ---------------------- */
@@ -2810,7 +2820,7 @@ export default function App() {
         if (record) {
           setAvatarCharacter(record.avatarCharacter);
           setQuantities(record.quantities);
-          setMyStats(record.stats);
+          setMyStats(normalizeStatsForNow(record.stats));
           setFriends(record.friends ?? []);
           setCoins(record.coins ?? STARTER_COINS);
           setTools(record.tools ?? {});
@@ -2861,7 +2871,7 @@ export default function App() {
     if (existing) {
       setAvatarCharacter(existing.avatarCharacter);
       setQuantities(existing.quantities);
-      setMyStats(existing.stats);
+      setMyStats(normalizeStatsForNow(existing.stats));
       setFriends(existing.friends ?? []);
       setCoins(existing.coins ?? STARTER_COINS);
       setTools(existing.tools ?? {});
@@ -2922,14 +2932,21 @@ export default function App() {
   // 一選定呼吸棒（鎖定、開始抽）就立刻生效：背包那隻 -1、今日/本月/累積休息次數各 +1
   // 同時記錄下這次「開抽」的時間，抽完後歷史紀錄要顯示這個時間
   const handleConfirmSkin = (skinId: string) => {
-    puffStartTimeRef.current = new Date();
+    const now = new Date();
+    puffStartTimeRef.current = now;
     setQuantities((prev) => ({ ...prev, [skinId]: Math.max(0, (prev[skinId] ?? 0) - 1) }));
-    setMyStats((prev) => ({
-      ...prev,
-      todayRestCount: prev.todayRestCount + 1,
-      monthRestCount: prev.monthRestCount + 1,
-      totalRestCount: prev.totalRestCount + 1,
-    }));
+    setMyStats((prev) => {
+      const todayKey = getDateKey(now);
+      const sameDay = prev.lastRestDateKey === todayKey;
+      const sameMonth = !!prev.lastRestDateKey && prev.lastRestDateKey.slice(0, 7) === todayKey.slice(0, 7);
+      return {
+        ...prev,
+        todayRestCount: (sameDay ? prev.todayRestCount : 0) + 1,
+        monthRestCount: (sameMonth ? prev.monthRestCount : 0) + 1,
+        totalRestCount: prev.totalRestCount + 1,
+        lastRestDateKey: todayKey,
+      };
+    });
     setLungBlackenPoints((prev) => prev + 1);
     // 通知所有把我加為好友的人：我開抽了
     if (nickname && watchers.length > 0) {
@@ -3036,7 +3053,7 @@ export default function App() {
     setToastMessage(null);
     const record = await fetchAccount(searchName);
     if (record) {
-      setFriendRecord({ nickname: searchName, record });
+      setFriendRecord({ nickname: searchName, record: { ...record, stats: normalizeStatsForNow(record.stats) } });
       setScreen('friend');
     } else {
       setToastMessage(`找不到暱稱「${searchName}」的放空紀錄，對方可能還沒開始玩`);
