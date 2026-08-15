@@ -3,18 +3,20 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 
 /* ============================================================
-   Cloud Puff ☁️ — Web 單檔元件版（第十七版）
+   Cloud Puff ☁️ — Web 單檔元件版（第二十一版）
    直接把這個檔案放到 Next.js 專案的 app/page.tsx（或任一 page）
    即可部署到 Vercel。全部邏輯、樣式、假資料都包在同一個檔案裡，
    使用 styled-jsx（Next.js 內建，免安裝）做動畫與樣式。
 
-   本版重寫「今日／本月休息」的計算方式：
-   12. 不再用會忘記歸零的累加計數器，改成每次開抽都記一筆完整時間戳記
-       （puffTimestamps），今日／本月次數永遠是即時從這份時間清單算出來的，
-       不會有算錯或忘記歸零的問題。
-   13. 自動搬遷舊資料：帳號第一次讀取時，如果偵測到還是舊制、沒有時間戳記，
-       會用「歷史紀錄」裡本來就記著的每次開抽日期時間，反推出對應的時間戳記，
-       所以改版前抽的紀錄也會正確被算進當時的今日／本月次數。
+   本版新增：
+   18. 🚬「免費的給你抽啦」：只要「開抽」就會拿到一張免費菸（不用抽完），
+       可以在背包或朋友的放空紀錄頁使用，硬請朋友抽一支。
+   19. 新增「累積二手菸」統計：被別人用免費菸請一次就 +1。
+       這個數字跟自己抽的完全分開算 —— 不影響肺部黑化程度、等級、
+       今日／本月／累積放空次數，只是單純記錄被請了幾支。
+       對方會收到通知：「OOO：免費的給你抽啦！」
+
+   註：抽完一整支的獎勵仍然是一張呼吸券 🎫（用來搶朋友的錢）。
 
    （其餘功能同上一版，詳見各段落內的中文註解）
    ============================================================ */
@@ -61,6 +63,9 @@ interface RestHistoryItem {
 
 interface UserStats {
   totalRestCount: number;
+  // 被別人用「免費菸」請過幾次（累積二手菸）。跟自己抽的次數完全分開算，
+  // 不影響肺部黑化、等級、今日／本月次數。
+  secondhandCount?: number;
   history: RestHistoryItem[];
   // 每次「開抽」當下的完整時間戳記（ISO 格式），今日/本月次數都是即時從這份清單算出來的，
   // 不再用會忘記歸零的累加計數器。只保留最近一段時間的紀錄就夠算今日/本月了。
@@ -71,10 +76,9 @@ interface UserStats {
 // 'stolen' = 呼吸小偷偷了你（from=小偷暱稱, amount=偷了幾隻呼吸棒）
 // 'friend_puffing' = 你有加的好友開始抽了（from=好友暱稱）
 // 'robbed' = 有人用呼吸券搶走你的錢（from=搶匪暱稱, amount=搶走幾元）
-// 'lung_cleaned' = 有朋友幫你洗肺（from=朋友暱稱）
-// 'lung_dirtied' = 有朋友丟二手雲讓你的肺變黑（from=朋友暱稱）
+// 'force_puffed' = 有朋友請你抽一支（from=朋友暱稱），你的累積二手菸會 +1
 interface NotificationEntry {
-  kind: 'stolen' | 'friend_puffing' | 'robbed' | 'lung_cleaned' | 'lung_dirtied';
+  kind: 'stolen' | 'friend_puffing' | 'robbed' | 'force_puffed';
   from: string;
   amount?: number;
   date: string;
@@ -248,9 +252,8 @@ interface AccountRecord {
   coins?: number; // 零錢包餘額（元），大家都從 0 元開始
   comments?: CommentEntry[]; // 別人留在這個帳號放空紀錄下面的留言
   tools?: Record<string, number>; // 特殊道具庫存，例如 breathThief（呼吸小偷）
-  notifications?: NotificationEntry[]; // 收到的通知：被偷、好友開抽、被洗肺、被丟黑雲
+  notifications?: NotificationEntry[]; // 收到的通知：被偷、被搶、好友開抽
   watchers?: string[]; // 有把「我」加為好友的人的暱稱清單，我開抽時要通知這些人
-  lungBlackenPoints?: number; // 肺部黑化的實際點數：預設等於累積放空次數，但朋友可以幫你洗（-1）或丟黑雲弄髒（+1）
 }
 
 const mockSkins: SkinData[] = [
@@ -332,6 +335,7 @@ const STARTER_QUANTITIES: Record<string, number> = Object.fromEntries(mockSkins.
 // 全新帳號一開始的放空紀錄（都從 0 開始）
 const STARTER_STATS: UserStats = {
   totalRestCount: 0,
+  secondhandCount: 0,
   history: [],
   puffTimestamps: [],
 };
@@ -364,13 +368,9 @@ const TOOL_BREATH_VOUCHER = 'breathVoucher';
 const ROB_MIN_AMOUNT = 100;
 const ROB_MAX_AMOUNT = 200;
 
-// 黑雲（二手煙）：完整抽完一整隻呼吸棒也會拿到一朵
-// 可以在背包裡使用，丟給朋友惡搞，讓他的肺變黑 1 點
-const TOOL_BLACK_CLOUD = 'blackCloud';
-// 每次「幫朋友洗肺」可以恢復的黑化點數
-const LUNG_CLEAN_AMOUNT = 1;
-// 每次「丟黑雲」造成的黑化點數
-const LUNG_DIRTY_AMOUNT = 1;
+// 免費菸（免費的給你抽啦）：只要「開抽」就會拿到一張，不用抽完
+// 可以在背包或朋友頁使用，硬請朋友抽一支：對方累積放空次數 +1（肺會變黑一點）
+const TOOL_FREE_PUFF = 'freePuff';
 
 /* ============================================================
    共用小元件（都定義在同一檔案內，不拆檔）
@@ -778,11 +778,11 @@ function hexLerp(hexA: string, hexB: string, t: number): string {
   return `#${toHex(r)}${toHex(g)}${toHex(bl)}`;
 }
 
-// 黑化點數達到這個數字時，肺會呈現完全黑化（預設等於累積放空次數，但可被朋友洗肺/丟黑雲調整）
+// 累積放空次數達到這個數字時，肺會呈現完全黑化
 const LUNG_FULLY_BLACK_AT_COUNT = 200;
 
-function LungIcon({ blackenPoints, size = 96 }: { blackenPoints: number; size?: number }) {
-  const t = Math.max(0, Math.min(1, blackenPoints / LUNG_FULLY_BLACK_AT_COUNT));
+function LungIcon({ totalRestCount, size = 96 }: { totalRestCount: number; size?: number }) {
+  const t = Math.max(0, Math.min(1, totalRestCount / LUNG_FULLY_BLACK_AT_COUNT));
   const fill = hexLerp('#FFD6E7', '#26262E', t);
   const stroke = hexLerp('#FF9FCB', '#0D0D10', t);
   const spotOpacity = 0.12 + t * 0.4; // 抽越多，黑斑越明顯
@@ -1690,8 +1690,8 @@ function BackpackScreen({
   onUseBreathThief,
   breathVoucherCount,
   onUseBreathVoucher,
-  blackCloudCount,
-  onUseBlackCloud,
+  freePuffCount,
+  onUseFreePuff,
   onBack,
   onGoShop,
 }: {
@@ -1701,15 +1701,15 @@ function BackpackScreen({
   onUseBreathThief: (targetNickname: string) => void;
   breathVoucherCount: number;
   onUseBreathVoucher: (targetNickname: string) => void;
-  blackCloudCount: number;
-  onUseBlackCloud: (targetNickname: string) => void;
+  freePuffCount: number;
+  onUseFreePuff: (targetNickname: string) => void;
   onBack: () => void;
   onGoShop: () => void;
 }) {
   const totalCount = skins.reduce((sum, s) => sum + s.quantity, 0);
   const [showThiefPicker, setShowThiefPicker] = useState(false);
   const [showVoucherPicker, setShowVoucherPicker] = useState(false);
-  const [showCloudPicker, setShowCloudPicker] = useState(false);
+  const [showFreePuffPicker, setShowFreePuffPicker] = useState(false);
 
   return (
     <div style={{ padding: `${spacing.md}px ${spacing.lg}px`, paddingBottom: 100 }}>
@@ -1862,8 +1862,8 @@ function BackpackScreen({
         </div>
       )}
 
-      {/* 道具：黑雲 — 完整抽完一支呼吸棒也會拿到一朵，可以拿去惡搞朋友的肺 */}
-      {blackCloudCount > 0 && (
+      {/* 道具：免費菸 — 只要開抽就會拿到一張（不用抽完），可以硬請朋友抽一支 */}
+      {freePuffCount > 0 && (
         <div
           style={{
             background: colors.surface,
@@ -1874,15 +1874,15 @@ function BackpackScreen({
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: spacing.md }}>
-            <div style={{ fontSize: 32 }}>☁️</div>
+            <div style={{ fontSize: 32 }}>🚬</div>
             <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 16, fontWeight: 600, color: colors.textPrimary }}>黑雲 x{blackCloudCount}</div>
+              <div style={{ fontSize: 16, fontWeight: 600, color: colors.textPrimary }}>免費菸 x{freePuffCount}</div>
               <div style={{ fontSize: 12, color: colors.textSecondary, marginTop: 2 }}>
-                選一個朋友，送他一朵二手雲，讓他的肺變黑 {LUNG_DIRTY_AMOUNT} 點
+                請朋友抽一支，他的「累積二手菸」+1
               </div>
             </div>
             <button
-              onClick={() => setShowCloudPicker((v) => !v)}
+              onClick={() => setShowFreePuffPicker((v) => !v)}
               style={{
                 padding: '8px 16px',
                 borderRadius: radius.pill,
@@ -1898,17 +1898,17 @@ function BackpackScreen({
             </button>
           </div>
 
-          {showCloudPicker && (
+          {showFreePuffPicker && (
             <div style={{ marginTop: spacing.md, borderTop: `1px solid ${colors.surfaceMuted}`, paddingTop: spacing.sm }}>
               {friends.length === 0 && (
-                <div style={{ fontSize: 13, color: colors.textSecondary }}>還沒有好友可以送，先去首頁加幾個好友吧</div>
+                <div style={{ fontSize: 13, color: colors.textSecondary }}>還沒有好友可以請，先去首頁加幾個好友吧</div>
               )}
               {friends.map((f) => (
                 <button
                   key={f}
                   onClick={() => {
-                    onUseBlackCloud(f);
-                    setShowCloudPicker(false);
+                    onUseFreePuff(f);
+                    setShowFreePuffPicker(false);
                   }}
                   style={{
                     display: 'flex',
@@ -1924,7 +1924,7 @@ function BackpackScreen({
                   }}
                 >
                   <span style={{ fontSize: 14, color: colors.textPrimary }}>{f}</span>
-                  <span style={{ fontSize: 13, color: colors.lavender, fontWeight: 600 }}>送 TA →</span>
+                  <span style={{ fontSize: 13, color: colors.lavender, fontWeight: 600 }}>請 TA 抽 →</span>
                 </button>
               ))}
             </div>
@@ -2001,31 +2001,26 @@ function StatsScreen({
   nickname,
   avatarCharacter,
   stats,
-  lungBlackenPoints,
   onBack,
   isFriend,
   onToggleFriend,
   comments,
   onSubmitComment,
-  onCleanLung,
-  onThrowCloud,
-  blackCloudCount,
+  onFreePuff,
+  freePuffCount,
 }: {
   nickname: string;
   avatarCharacter: CharacterType;
   stats: UserStats;
-  lungBlackenPoints: number;
   onBack?: () => void;
   isFriend?: boolean;
   onToggleFriend?: () => void;
   comments?: CommentEntry[];
   onSubmitComment?: (text: string) => void;
-  onCleanLung?: () => void;
-  onThrowCloud?: () => void;
-  blackCloudCount?: number;
+  onFreePuff?: () => void;
+  freePuffCount?: number;
 }) {
   const [commentInput, setCommentInput] = useState('');
-  const isViewingFriend = !!onBack;
   return (
     <div style={{ padding: `${spacing.md}px ${spacing.lg}px`, paddingBottom: 100, display: 'flex', flexDirection: 'column', gap: spacing.md }}>
       {onBack && (
@@ -2089,9 +2084,9 @@ function StatsScreen({
         );
       })()}
 
-      {/* 肺部圖示：黑化點數越高，肺會越黑（放大顯示） */}
+      {/* 肺部圖示：累積放空次數越多，肺會越黑（放大顯示） */}
       <Card style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: spacing.sm, textAlign: 'center' }}>
-        <LungIcon blackenPoints={lungBlackenPoints} size={180} />
+        <LungIcon totalRestCount={stats.totalRestCount} size={180} />
         <div>
           <div style={{ fontSize: 16, fontWeight: 600, color: colors.textPrimary }}>肺部狀態</div>
           <div style={{ fontSize: 13, color: colors.textSecondary, marginTop: 4 }}>
@@ -2099,47 +2094,26 @@ function StatsScreen({
           </div>
         </div>
 
-        {/* 只有在看朋友的頁面時才會出現：幫他洗肺 / 送他二手雲 */}
-        {isViewingFriend && (onCleanLung || onThrowCloud) && (
-          <div style={{ display: 'flex', gap: spacing.sm, marginTop: spacing.xs, width: '100%' }}>
-            {onCleanLung && (
-              <button
-                onClick={onCleanLung}
-                style={{
-                  flex: 1,
-                  padding: '10px 0',
-                  borderRadius: radius.pill,
-                  border: 'none',
-                  background: colors.mintGreen,
-                  color: colors.textPrimary,
-                  fontWeight: 600,
-                  fontSize: 13,
-                  cursor: 'pointer',
-                }}
-              >
-                🫁 幫他洗肺
-              </button>
-            )}
-            {onThrowCloud && (
-              <button
-                onClick={onThrowCloud}
-                disabled={!blackCloudCount || blackCloudCount <= 0}
-                style={{
-                  flex: 1,
-                  padding: '10px 0',
-                  borderRadius: radius.pill,
-                  border: 'none',
-                  background: blackCloudCount && blackCloudCount > 0 ? '#2B2B33' : colors.surfaceMuted,
-                  color: blackCloudCount && blackCloudCount > 0 ? '#FFFFFF' : colors.textSecondary,
-                  fontWeight: 600,
-                  fontSize: 13,
-                  cursor: blackCloudCount && blackCloudCount > 0 ? 'pointer' : 'default',
-                }}
-              >
-                ☁️ 送他二手雲 {blackCloudCount ? `x${blackCloudCount}` : ''}
-              </button>
-            )}
-          </div>
+        {/* 只有在看朋友的頁面時才會出現：免費的給你抽啦 */}
+        {onBack && onFreePuff && (
+          <button
+            onClick={onFreePuff}
+            disabled={!freePuffCount || freePuffCount <= 0}
+            style={{
+              width: '100%',
+              marginTop: spacing.xs,
+              padding: '10px 0',
+              borderRadius: radius.pill,
+              border: 'none',
+              background: freePuffCount && freePuffCount > 0 ? '#2B2B33' : colors.surfaceMuted,
+              color: freePuffCount && freePuffCount > 0 ? '#FFFFFF' : colors.textSecondary,
+              fontWeight: 600,
+              fontSize: 13,
+              cursor: freePuffCount && freePuffCount > 0 ? 'pointer' : 'default',
+            }}
+          >
+            🚬 免費的給你抽啦 {freePuffCount ? `x${freePuffCount}` : ''}
+          </button>
         )}
       </Card>
 
@@ -2163,6 +2137,15 @@ function StatsScreen({
           </div>
         );
       })()}
+
+      {/* 累積二手菸：被別人用「免費菸」請過幾次，跟自己抽的完全分開算 */}
+      <Card style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div>
+          <div style={{ fontSize: 15, fontWeight: 600, color: colors.textPrimary }}>🚬 累積二手菸</div>
+          <div style={{ fontSize: 12, color: colors.textSecondary, marginTop: 2 }}>被朋友請客抽掉的，不算在自己頭上</div>
+        </div>
+        <div style={{ fontSize: 20, fontWeight: 700, color: colors.textPrimary }}>{stats.secondhandCount ?? 0} 支</div>
+      </Card>
 
       <Card>
         <div style={{ fontSize: 20, fontWeight: 600, color: colors.textPrimary, marginBottom: spacing.sm }}>歷史紀錄</div>
@@ -2291,7 +2274,7 @@ function NotificationsScreen({
           }}
         >
           <div style={{ fontSize: 28 }}>
-            {n.kind === 'stolen' ? '🕵️' : n.kind === 'robbed' ? '🤕' : n.kind === 'lung_cleaned' ? '🫧' : n.kind === 'lung_dirtied' ? '☁️' : '🥺'}
+            {n.kind === 'stolen' ? '🕵️' : n.kind === 'robbed' ? '🤕' : n.kind === 'force_puffed' ? '🚬' : '🥺'}
           </div>
           <div style={{ flex: 1 }}>
             <div style={{ fontSize: 14, color: colors.textPrimary, lineHeight: 1.5 }}>
@@ -2305,19 +2288,14 @@ function NotificationsScreen({
                   <strong>{n.from}</strong>：「把錢拿來讓我去治病」搶走了你 <strong style={{ color: colors.danger }}>{n.amount}</strong> 元
                 </>
               )}
+              {n.kind === 'force_puffed' && (
+                <>
+                  <strong>{n.from}</strong>：免費的給你抽啦！
+                </>
+              )}
               {n.kind === 'friend_puffing' && (
                 <>
                   <strong>{n.from}</strong> 又在抽了，他真的很可憐🥺
-                </>
-              )}
-              {n.kind === 'lung_cleaned' && (
-                <>
-                  你的好友 <strong>{n.from}</strong> 看你的肺太黑了，幫你刷洗了一下肺部！
-                </>
-              )}
-              {n.kind === 'lung_dirtied' && (
-                <>
-                  <strong>{n.from}</strong>：免費的送你吸啦！
                 </>
               )}
             </div>
@@ -2562,46 +2540,25 @@ async function robCoinsFromFriend(
   return { success: true, robbedAmount };
 }
 
-// 幫朋友洗肺：把對方的黑化點數 -1（不會低於 0），並留一筆通知讓他知道是誰幫他洗的
-async function cleanFriendLung(friendNickname: string, cleanerNickname: string): Promise<{ success: boolean; newBlackenPoints: number }> {
+// 免費的給你抽啦：硬請朋友抽一支。只會讓對方的「累積二手菸」+1，
+// 不影響他自己的累積放空次數、肺部黑化、等級或今日／本月統計。
+async function forcePuffFriend(friendNickname: string, giverNickname: string): Promise<{ success: boolean; newSecondhand: number }> {
   const friendAccount = await fetchAccount(friendNickname);
-  if (!friendAccount) return { success: false, newBlackenPoints: 0 };
+  if (!friendAccount) return { success: false, newSecondhand: 0 };
 
-  const currentPoints = friendAccount.lungBlackenPoints ?? friendAccount.stats.totalRestCount;
-  const newBlackenPoints = Math.max(0, currentPoints - LUNG_CLEAN_AMOUNT);
+  const newSecondhand = (friendAccount.stats.secondhandCount ?? 0) + 1;
 
   const newNotifications = [
-    { kind: 'lung_cleaned' as const, from: cleanerNickname, date: formatDateTime(new Date()), read: false },
+    { kind: 'force_puffed' as const, from: giverNickname, date: formatDateTime(new Date()), read: false },
     ...(friendAccount.notifications ?? []),
   ].slice(0, 50);
 
   await saveAccount(friendNickname, {
     ...friendAccount,
-    lungBlackenPoints: newBlackenPoints,
+    stats: { ...friendAccount.stats, secondhandCount: newSecondhand },
     notifications: newNotifications,
   });
-  return { success: true, newBlackenPoints };
-}
-
-// 丟黑雲給朋友：把對方的黑化點數 +1，並留一筆通知讓他知道是誰丟的
-async function throwBlackCloudAtFriend(friendNickname: string, throwerNickname: string): Promise<{ success: boolean; newBlackenPoints: number }> {
-  const friendAccount = await fetchAccount(friendNickname);
-  if (!friendAccount) return { success: false, newBlackenPoints: 0 };
-
-  const currentPoints = friendAccount.lungBlackenPoints ?? friendAccount.stats.totalRestCount;
-  const newBlackenPoints = currentPoints + LUNG_DIRTY_AMOUNT;
-
-  const newNotifications = [
-    { kind: 'lung_dirtied' as const, from: throwerNickname, date: formatDateTime(new Date()), read: false },
-    ...(friendAccount.notifications ?? []),
-  ].slice(0, 50);
-
-  await saveAccount(friendNickname, {
-    ...friendAccount,
-    lungBlackenPoints: newBlackenPoints,
-    notifications: newNotifications,
-  });
-  return { success: true, newBlackenPoints };
+  return { success: true, newSecondhand };
 }
 
 // 加好友時：把「我」加進對方帳號的 watchers 清單，這樣對方開抽時才知道要通知我
@@ -2749,11 +2706,10 @@ export default function App() {
   const [tools, setTools] = useState<Record<string, number>>({}); // 特殊道具庫存，例如呼吸小偷
   const breathThiefCount = tools[TOOL_BREATH_THIEF] ?? 0;
   const breathVoucherCount = tools[TOOL_BREATH_VOUCHER] ?? 0;
-  const blackCloudCount = tools[TOOL_BLACK_CLOUD] ?? 0;
+  const freePuffCount = tools[TOOL_FREE_PUFF] ?? 0;
   const [myComments, setMyComments] = useState<CommentEntry[]>([]); // 別人留在我放空紀錄下面的留言
-  const [notifications, setNotifications] = useState<NotificationEntry[]>([]); // 收到的通知：被偷、好友開抽、被洗肺、被丟黑雲
+  const [notifications, setNotifications] = useState<NotificationEntry[]>([]); // 收到的通知：被偷、被搶、好友開抽
   const [watchers, setWatchers] = useState<string[]>([]); // 誰把我加為好友了（我開抽時要通知這些人）
-  const [lungBlackenPoints, setLungBlackenPoints] = useState<number>(0); // 我的肺部黑化點數（可被朋友洗肺/丟黑雲調整）
   const unreadNotificationCount = notifications.filter((n) => !n.read).length;
 
   // 記錄這次「開抽」是什麼時候按下去的，抽完之後歷史紀錄要顯示這個開抽時間
@@ -2803,7 +2759,6 @@ export default function App() {
           setMyComments(record.comments ?? []);
           setNotifications(record.notifications ?? []);
           setWatchers(record.watchers ?? []);
-          setLungBlackenPoints(record.lungBlackenPoints ?? record.stats.totalRestCount);
         } else {
           setAvatarCharacter('cat');
           setQuantities(STARTER_QUANTITIES);
@@ -2814,7 +2769,6 @@ export default function App() {
           setMyComments([]);
           setNotifications([]);
           setWatchers([]);
-          setLungBlackenPoints(0);
         }
         setNickname(savedNickname);
         setAccountReady(true);
@@ -2836,10 +2790,9 @@ export default function App() {
       comments: myComments,
       notifications,
       watchers,
-      lungBlackenPoints,
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [quantities, myStats, avatarCharacter, friends, coins, tools, myComments, notifications, watchers, lungBlackenPoints, nickname, accountReady]);
+  }, [quantities, myStats, avatarCharacter, friends, coins, tools, myComments, notifications, watchers, nickname, accountReady]);
 
   // 輸入暱稱畫面按下「開始放空」：如果這個暱稱雲端已經有資料就直接讀取，沒有的話幫他建一個新帳號
   const handleCreateAccount = async (name: string, avatar: CharacterType) => {
@@ -2854,7 +2807,6 @@ export default function App() {
       setMyComments(existing.comments ?? []);
       setNotifications(existing.notifications ?? []);
       setWatchers(existing.watchers ?? []);
-      setLungBlackenPoints(existing.lungBlackenPoints ?? existing.stats.totalRestCount);
     } else {
       setAvatarCharacter(avatar);
       setQuantities(STARTER_QUANTITIES);
@@ -2865,7 +2817,6 @@ export default function App() {
       setMyComments([]);
       setNotifications([]);
       setWatchers([]);
-      setLungBlackenPoints(0);
       await saveAccount(name, {
         avatarCharacter: avatar,
         quantities: STARTER_QUANTITIES,
@@ -2876,7 +2827,6 @@ export default function App() {
         comments: [],
         notifications: [],
         watchers: [],
-        lungBlackenPoints: 0,
       });
     }
     window.localStorage.setItem('cloudpuff_nickname', name);
@@ -2916,7 +2866,8 @@ export default function App() {
       totalRestCount: prev.totalRestCount + 1,
       puffTimestamps: [now.toISOString(), ...(prev.puffTimestamps ?? [])].slice(0, 500),
     }));
-    setLungBlackenPoints((prev) => prev + 1);
+    // 只要開抽就送一張免費菸（不用抽完）
+    setTools((prev) => ({ ...prev, [TOOL_FREE_PUFF]: (prev[TOOL_FREE_PUFF] ?? 0) + 1 }));
     // 通知所有把我加為好友的人：我開抽了
     if (nickname && watchers.length > 0) {
       notifyWatchersOfPuff(watchers, nickname);
@@ -2937,13 +2888,9 @@ export default function App() {
       ...prev,
       history: [{ date: dateLabel, withWho: '獨自放空', duration: `${minutes}:${seconds}` }, ...prev.history].slice(0, 20),
     }));
-    // 完整抽完一整隻呼吸棒，獎勵一張呼吸券＋一朵黑雲
-    setTools((prev) => ({
-      ...prev,
-      [TOOL_BREATH_VOUCHER]: (prev[TOOL_BREATH_VOUCHER] ?? 0) + 1,
-      [TOOL_BLACK_CLOUD]: (prev[TOOL_BLACK_CLOUD] ?? 0) + 1,
-    }));
-    setToastMessage('抽完了！獲得一張呼吸券 🎫 和一朵黑雲 ☁️');
+    // 完整抽完一整隻呼吸棒，獎勵一張呼吸券
+    setTools((prev) => ({ ...prev, [TOOL_BREATH_VOUCHER]: (prev[TOOL_BREATH_VOUCHER] ?? 0) + 1 }));
+    setToastMessage('抽完了！獲得一張呼吸券 🎫');
     puffStartTimeRef.current = null;
   };
 
@@ -3136,37 +3083,25 @@ export default function App() {
     }
   };
 
-  // 幫朋友洗肺：不限次數，每次幫他的黑化點數 -1，並讓他收到通知
-  const handleCleanFriendLung = async (targetNickname: string) => {
-    if (!nickname) return;
-    const result = await cleanFriendLung(targetNickname, nickname);
-    if (!result.success) {
-      setToastMessage(`洗肺失敗，找不到「${targetNickname}」的帳號`);
-      return;
-    }
-    setFriendRecord((prev) =>
-      prev && prev.nickname === targetNickname ? { ...prev, record: { ...prev.record, lungBlackenPoints: result.newBlackenPoints } } : prev
-    );
-    setToastMessage(`幫 ${targetNickname} 洗肺了一下 🫧`);
-  };
-
-  // 丟黑雲給朋友：消耗一朵黑雲，讓對方的黑化點數 +1，並讓他收到通知
-  const handleThrowBlackCloud = async (targetNickname: string) => {
-    if (blackCloudCount <= 0) {
-      setToastMessage('沒有黑雲了，抽完一整支呼吸棒才會拿到');
+  // 免費的給你抽啦：消耗一張免費菸，硬請朋友抽一支，對方累積放空次數 +1 並收到通知
+  const handleFreePuffFriend = async (targetNickname: string) => {
+    if (freePuffCount <= 0) {
+      setToastMessage('沒有免費菸了，開抽一次就會拿到一張');
       return;
     }
     if (!nickname) return;
-    setTools((prev) => ({ ...prev, [TOOL_BLACK_CLOUD]: Math.max(0, (prev[TOOL_BLACK_CLOUD] ?? 0) - 1) }));
-    const result = await throwBlackCloudAtFriend(targetNickname, nickname);
+    setTools((prev) => ({ ...prev, [TOOL_FREE_PUFF]: Math.max(0, (prev[TOOL_FREE_PUFF] ?? 0) - 1) }));
+    const result = await forcePuffFriend(targetNickname, nickname);
     if (!result.success) {
-      setToastMessage(`丟黑雲失敗，找不到「${targetNickname}」的帳號`);
+      setToastMessage(`請客失敗，找不到「${targetNickname}」的帳號`);
       return;
     }
     setFriendRecord((prev) =>
-      prev && prev.nickname === targetNickname ? { ...prev, record: { ...prev.record, lungBlackenPoints: result.newBlackenPoints } } : prev
+      prev && prev.nickname === targetNickname
+        ? { ...prev, record: { ...prev.record, stats: { ...prev.record.stats, secondhandCount: result.newSecondhand } } }
+        : prev
     );
-    setToastMessage(`送了一朵黑雲給 ${targetNickname} ☁️`);
+    setToastMessage(`請 ${targetNickname} 抽了一支 🚬`);
   };
 
   // 還沒登入：先顯示輸入暱稱畫面
@@ -3219,8 +3154,8 @@ export default function App() {
           onUseBreathThief={handleUseBreathThief}
           breathVoucherCount={breathVoucherCount}
           onUseBreathVoucher={handleUseBreathVoucher}
-          blackCloudCount={blackCloudCount}
-          onUseBlackCloud={handleThrowBlackCloud}
+          freePuffCount={freePuffCount}
+          onUseFreePuff={handleFreePuffFriend}
           onBack={handleBackHome}
           onGoShop={handleGoShop}
         />
@@ -3230,7 +3165,6 @@ export default function App() {
           nickname={displayUser.nickname}
           avatarCharacter={avatarCharacter}
           stats={myStats}
-          lungBlackenPoints={lungBlackenPoints}
           comments={myComments}
         />
       )}
@@ -3239,15 +3173,13 @@ export default function App() {
           nickname={friendRecord.nickname}
           avatarCharacter={friendRecord.record.avatarCharacter}
           stats={friendRecord.record.stats}
-          lungBlackenPoints={friendRecord.record.lungBlackenPoints ?? friendRecord.record.stats.totalRestCount}
           onBack={handleBackFromFriend}
           isFriend={friends.includes(friendRecord.nickname)}
           onToggleFriend={handleToggleFriend}
           comments={friendRecord.record.comments ?? []}
           onSubmitComment={handleSubmitComment}
-          onCleanLung={() => handleCleanFriendLung(friendRecord.nickname)}
-          onThrowCloud={() => handleThrowBlackCloud(friendRecord.nickname)}
-          blackCloudCount={blackCloudCount}
+          onFreePuff={() => handleFreePuffFriend(friendRecord.nickname)}
+          freePuffCount={freePuffCount}
         />
       )}
       {screen === 'shop' && (
