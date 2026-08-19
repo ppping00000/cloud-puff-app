@@ -954,7 +954,7 @@ function HomeScreen({
     <div style={{ padding: `${spacing.md}px ${spacing.lg}px`, paddingBottom: 100 }}>
       {/* 頂部 */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: spacing.md }}>
-        <h1 style={{ fontSize: 26, fontWeight: 700, color: colors.textPrimary, margin: 0 }}>☁️ Cloud Puff</h1>
+        <h1 style={{ fontSize: 26, fontWeight: 700, color: colors.textPrimary, margin: 0 }}>{`don't smoke`}</h1>
         <div style={{ display: 'flex', gap: spacing.md, fontSize: 20, alignItems: 'center' }}>
           <button onClick={onGoBackpack} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 20, padding: 0 }}>
             🎒
@@ -1645,7 +1645,7 @@ function GoodKidGameScreen({
       <div style={{ textAlign: 'center', padding: `0 ${spacing.lg}px` }}>
         <h2 style={{ fontSize: 20, fontWeight: 700, color: colors.textPrimary, margin: '0 0 4px' }}>🧸 我是好寶寶</h2>
         <div style={{ fontSize: 13, color: colors.textSecondary }}>
-          請學會把垃圾放進垃圾桶裡
+          請學會把菸蒂丟進菸灰缸
         </div>
       </div>
 
