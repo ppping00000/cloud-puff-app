@@ -3,20 +3,16 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 
 /* ============================================================
-   Cloud Puff ☁️ — Web 單檔元件版（第二十一版）
+   Cloud Puff ☁️ — Web 單檔元件版（第二十二版）
    直接把這個檔案放到 Next.js 專案的 app/page.tsx（或任一 page）
    即可部署到 Vercel。全部邏輯、樣式、假資料都包在同一個檔案裡，
    使用 styled-jsx（Next.js 內建，免安裝）做動畫與樣式。
 
-   本版新增：
-   18. 🚬「免費的給你抽啦」：只要「開抽」就會拿到一張免費菸（不用抽完），
-       可以在背包或朋友的放空紀錄頁使用，硬請朋友抽一支。
-   19. 新增「累積二手菸」統計：被別人用免費菸請一次就 +1。
-       這個數字跟自己抽的完全分開算 —— 不影響肺部黑化程度、等級、
-       今日／本月／累積放空次數，只是單純記錄被請了幾支。
-       對方會收到通知：「OOO：免費的給你抽啦！」
-
-   註：抽完一整支的獎勵仍然是一張呼吸券 🎫（用來搶朋友的錢）。
+   本版變更：
+   20. 放空紀錄頁移除「歷史紀錄」與「留言」兩個區塊。
+       （開抽時間仍會在背景記錄，只是不再顯示出來）
+   21. 新增「💸 買菸花費」：累積休息每滿 20 支就算花了 100 元，
+       自己跟朋友的放空紀錄頁都看得到，讓大家知道他在買菸上花了多少。
 
    （其餘功能同上一版，詳見各段落內的中文註解）
    ============================================================ */
@@ -351,8 +347,14 @@ const GOOD_KID_COIN_PER_STICK = 1;
 // 遊戲場地上同時會有幾隻呼吸棒（撿走一隻就會馬上補一隻新的，等於無限生成）
 const GOOD_KID_STICK_COUNT = 6;
 
-// 在朋友的放空紀錄下面留言一次，可以賺多少錢
-const COMMENT_COIN_REWARD = 1;
+// 買菸花費：累積休息每滿 SPEND_PER_STICKS 支，就當作花了 SPEND_AMOUNT_PER_UNIT 元買菸
+const SPEND_PER_STICKS = 20;
+const SPEND_AMOUNT_PER_UNIT = 100;
+
+function computeCigaretteSpending(totalRestCount: number): number {
+  return Math.floor(totalRestCount / SPEND_PER_STICKS) * SPEND_AMOUNT_PER_UNIT;
+}
+
 
 // 商城買一個「呼吸小偷」道具要花的錢
 const BREATH_THIEF_PRICE = 50;
@@ -1672,7 +1674,7 @@ function ShopScreen({
         })}
       </div>
       <div style={{ fontSize: 12, color: colors.textSecondary, marginTop: spacing.md, textAlign: 'center' }}>
-        沒錢了嗎？回首頁玩「🧸 我是好寶寶」小遊戲，或去朋友的放空紀錄留言賺零用錢吧
+        沒錢了嗎？回首頁玩「🧸 我是好寶寶」小遊戲賺零用錢吧
       </div>
     </div>
   );
@@ -2004,8 +2006,6 @@ function StatsScreen({
   onBack,
   isFriend,
   onToggleFriend,
-  comments,
-  onSubmitComment,
   onFreePuff,
   freePuffCount,
 }: {
@@ -2015,12 +2015,9 @@ function StatsScreen({
   onBack?: () => void;
   isFriend?: boolean;
   onToggleFriend?: () => void;
-  comments?: CommentEntry[];
-  onSubmitComment?: (text: string) => void;
   onFreePuff?: () => void;
   freePuffCount?: number;
 }) {
-  const [commentInput, setCommentInput] = useState('');
   return (
     <div style={{ padding: `${spacing.md}px ${spacing.lg}px`, paddingBottom: 100, display: 'flex', flexDirection: 'column', gap: spacing.md }}>
       {onBack && (
@@ -2147,91 +2144,18 @@ function StatsScreen({
         <div style={{ fontSize: 20, fontWeight: 700, color: colors.textPrimary }}>{stats.secondhandCount ?? 0} 支</div>
       </Card>
 
-      <Card>
-        <div style={{ fontSize: 20, fontWeight: 600, color: colors.textPrimary, marginBottom: spacing.sm }}>歷史紀錄</div>
-        {stats.history.length === 0 && (
-          <div style={{ fontSize: 13, color: colors.textSecondary }}>還沒有任何紀錄</div>
-        )}
-        {stats.history.map((h, idx) => (
-          <div
-            key={idx}
-            style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              padding: '6px 0',
-              borderBottom: idx < stats.history.length - 1 ? `1px solid ${colors.surfaceMuted}` : 'none',
-              fontSize: 14,
-              color: colors.textPrimary,
-            }}
-          >
-            <span style={{ color: colors.textSecondary }}>開抽 {h.date}</span>
-            <span>與{h.withWho}</span>
-            <span>{h.duration}</span>
+      {/* 買菸花費：累積休息每滿 20 支，就當作花了 100 元買菸 */}
+      <Card style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div>
+          <div style={{ fontSize: 15, fontWeight: 600, color: colors.textPrimary }}>💸 買菸花費</div>
+          <div style={{ fontSize: 12, color: colors.textSecondary, marginTop: 2 }}>
+            每抽滿 {SPEND_PER_STICKS} 支就是 {SPEND_AMOUNT_PER_UNIT} 元
           </div>
-        ))}
+        </div>
+        <div style={{ fontSize: 20, fontWeight: 700, color: colors.danger }}>
+          {computeCigaretteSpending(stats.totalRestCount)} 元
+        </div>
       </Card>
-
-      {/* 留言：在朋友的放空紀錄下面留言，留一次自己就能賺 1 元；自己的頁面也能看到別人留給自己的留言 */}
-      <Card>
-        <div style={{ fontSize: 20, fontWeight: 600, color: colors.textPrimary, marginBottom: spacing.sm }}>留言</div>
-        {onSubmitComment && (
-          <div style={{ display: 'flex', gap: spacing.sm, marginBottom: spacing.sm }}>
-              <input
-                value={commentInput}
-                onChange={(e) => setCommentInput(e.target.value)}
-                placeholder={`跟 ${nickname} 說句話（留言 +1 元）`}
-                style={{
-                  flex: 1,
-                  padding: '10px 14px',
-                  borderRadius: radius.input,
-                  border: `1px solid ${colors.surfaceMuted}`,
-                  fontSize: 14,
-                  outline: 'none',
-                }}
-              />
-              <button
-                onClick={() => {
-                  const trimmed = commentInput.trim();
-                  if (trimmed) {
-                    onSubmitComment(trimmed);
-                    setCommentInput('');
-                  }
-                }}
-                style={{
-                  padding: `0 ${spacing.md}px`,
-                  borderRadius: radius.pill,
-                  border: 'none',
-                  background: colors.lavender,
-                  color: colors.textOnColor,
-                  fontWeight: 600,
-                  fontSize: 14,
-                  cursor: 'pointer',
-                }}
-              >
-                留言
-              </button>
-            </div>
-          )}
-          {(!comments || comments.length === 0) && (
-            <div style={{ fontSize: 13, color: colors.textSecondary }}>還沒有人留言，第一個留言的人先賺 1 元 ✨</div>
-          )}
-          {comments &&
-            comments.map((c, idx) => (
-              <div
-                key={idx}
-                style={{
-                  padding: '8px 0',
-                  borderBottom: idx < comments.length - 1 ? `1px solid ${colors.surfaceMuted}` : 'none',
-                }}
-              >
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: colors.textSecondary }}>
-                  <span style={{ fontWeight: 600, color: colors.textPrimary }}>{c.from}</span>
-                  <span>{c.date}</span>
-                </div>
-                <div style={{ fontSize: 14, color: colors.textPrimary, marginTop: 2 }}>{c.text}</div>
-              </div>
-            ))}
-        </Card>
     </div>
   );
 }
@@ -3018,20 +2942,6 @@ export default function App() {
     }
   };
 
-  // 在朋友的放空紀錄下面留言：存到對方帳號的留言清單，自己則賺 COMMENT_COIN_REWARD 元
-  const handleSubmitComment = async (text: string) => {
-    if (!friendRecord || !nickname) return;
-    const dateLabel = formatDateTime(new Date());
-    const newComment: CommentEntry = { from: nickname, text, date: dateLabel };
-    const updatedRecord: AccountRecord = {
-      ...friendRecord.record,
-      comments: [newComment, ...(friendRecord.record.comments ?? [])].slice(0, 50),
-    };
-    setFriendRecord({ nickname: friendRecord.nickname, record: updatedRecord });
-    await saveAccount(friendRecord.nickname, updatedRecord);
-    setCoins((prev) => prev + COMMENT_COIN_REWARD);
-  };
-
   // 在背包使用呼吸小偷：選一個朋友，隨機偷走他 1～50 隻呼吸棒，偷到的直接進自己背包，
   // 同時會在對方帳號留下一筆通知，讓他知道是誰偷的、偷了幾隻
   const handleUseBreathThief = async (targetNickname: string) => {
@@ -3165,7 +3075,6 @@ export default function App() {
           nickname={displayUser.nickname}
           avatarCharacter={avatarCharacter}
           stats={myStats}
-          comments={myComments}
         />
       )}
       {screen === 'friend' && friendRecord && (
@@ -3176,8 +3085,6 @@ export default function App() {
           onBack={handleBackFromFriend}
           isFriend={friends.includes(friendRecord.nickname)}
           onToggleFriend={handleToggleFriend}
-          comments={friendRecord.record.comments ?? []}
-          onSubmitComment={handleSubmitComment}
           onFreePuff={() => handleFreePuffFriend(friendRecord.nickname)}
           freePuffCount={freePuffCount}
         />
