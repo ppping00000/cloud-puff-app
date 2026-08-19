@@ -3,16 +3,16 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 
 /* ============================================================
-   Cloud Puff ☁️ — Web 單檔元件版（第二十二版）
+   Cloud Puff ☁️ — Web 單檔元件版（第二十四版）
    直接把這個檔案放到 Next.js 專案的 app/page.tsx（或任一 page）
    即可部署到 Vercel。全部邏輯、樣式、假資料都包在同一個檔案裡，
    使用 styled-jsx（Next.js 內建，免安裝）做動畫與樣式。
 
    本版變更：
-   20. 放空紀錄頁移除「歷史紀錄」與「留言」兩個區塊。
-       （開抽時間仍會在背景記錄，只是不再顯示出來）
-   21. 新增「💸 買菸花費」：累積休息每滿 20 支就算花了 100 元，
-       自己跟朋友的放空紀錄頁都看得到，讓大家知道他在買菸上花了多少。
+   22. 小遊戲「我是好寶寶」的藍色桶子換成菸灰缸（AshtrayIcon）。
+   23. 地上可以點的魔法棒 emoji 換成菸蒂（CigaretteButtIcon），
+       每根都有隨機傾斜角度，看起來像真的散落在地上。
+   兩個圖示都是直接用 SVG 畫在這個檔案裡，不需要上傳任何圖片檔。
 
    （其餘功能同上一版，詳見各段落內的中文註解）
    ============================================================ */
@@ -1435,22 +1435,172 @@ function ResultScreen({
 
 /* ============================================================
    小遊戲：我是好寶寶
-   地上散落著呼吸棒，點一下把它撿進桶子裡，每撿一隻零錢包 +1 元。
+   地上散落著呼吸棒，點一下把它撿進菸灰缸裡，每撿一隻零錢包 +1 元。
    呼吸棒無限生成：撿走一隻，馬上會在別的地方冒出一隻新的。
    ============================================================ */
+
+/* ============================================================
+   菸蒂圖示 — 純 SVG，地上散落的可點擊垃圾
+   白色菸身 + 黃褐色濾嘴 + 燒黑的斷口，帶一點隨機傾斜
+   ============================================================ */
+
+function CigaretteButtIcon({ size = 40, rotate = 0 }: { size?: number; rotate?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size * 0.4}
+      viewBox="0 0 100 40"
+      style={{ display: 'block', transform: `rotate(${rotate}deg)` }}
+    >
+      {/* 淡淡的落地陰影 */}
+      <ellipse cx="50" cy="33" rx="40" ry="4" fill="#4A4A5A" opacity="0.12" />
+
+      {/* 濾嘴（左側，黃褐色） */}
+      <rect x="4" y="11" width="34" height="15" rx="7.5" fill="#D9A25A" />
+      {/* 濾嘴上的細紋 */}
+      <rect x="12" y="11" width="2" height="15" fill="#C08F4A" opacity="0.35" />
+      <rect x="20" y="11" width="2" height="15" fill="#C08F4A" opacity="0.35" />
+      <rect x="28" y="11" width="2" height="15" fill="#C08F4A" opacity="0.35" />
+
+      {/* 菸身（白色紙捲） */}
+      <rect x="34" y="11" width="52" height="15" rx="7.5" fill="#FAF7EF" />
+      {/* 菸身下緣的一點灰影，做出圓柱感 */}
+      <rect x="34" y="20" width="52" height="6" rx="3" fill="#D8D4C8" opacity="0.5" />
+
+      {/* 燒黑的斷口 */}
+      <rect x="79" y="11" width="9" height="15" rx="4" fill="#3A3A44" />
+      <ellipse cx="87" cy="18.5" rx="3" ry="7" fill="#1C1C23" />
+    </svg>
+  );
+}
+
+/* ============================================================
+   菸灰缸圖示 — 純 SVG 畫的，不需要上傳任何圖片檔
+   深色缸體 + 兩道凹槽 + 缸內菸灰與菸屁股 + 一縷輕煙
+   ============================================================ */
+
+function AshtrayIcon({ size = 96 }: { size?: number }) {
+  return (
+    <svg width={size} height={size * 1.02} viewBox="0 -50 200 206" style={{ display: 'block' }}>
+      <defs>
+        {/* 缸體：左亮右暗的立體感 */}
+        <linearGradient id="ashtray-body" x1="0" y1="0" x2="1" y2="0.4">
+          <stop offset="0%" stopColor="#54545F" />
+          <stop offset="40%" stopColor="#3A3A44" />
+          <stop offset="100%" stopColor="#22222A" />
+        </linearGradient>
+        {/* 缸內：越靠內側越暗 */}
+        <radialGradient id="ashtray-bowl" cx="0.5" cy="0.38" r="0.62">
+          <stop offset="0%" stopColor="#15151B" />
+          <stop offset="70%" stopColor="#26262E" />
+          <stop offset="100%" stopColor="#33333D" />
+        </radialGradient>
+      </defs>
+
+      {/* 三隻小腳 */}
+      <ellipse cx="58" cy="146" rx="9" ry="6" fill="#1C1C23" />
+      <ellipse cx="142" cy="146" rx="9" ry="6" fill="#1C1C23" />
+
+      {/* 缸體主體 */}
+      <path
+        d="M18,74 C18,112 52,142 100,142 C148,142 182,112 182,74 C182,58 168,50 152,50 L48,50 C32,50 18,58 18,74 Z"
+        fill="url(#ashtray-body)"
+      />
+      {/* 缸口外緣 */}
+      <ellipse cx="100" cy="56" rx="82" ry="34" fill="url(#ashtray-body)" />
+      {/* 缸口內側凹陷 */}
+      <ellipse cx="100" cy="58" rx="62" ry="24" fill="url(#ashtray-bowl)" />
+
+      {/* 缸緣兩側的放菸凹槽 */}
+      <ellipse cx="26" cy="52" rx="13" ry="6" fill="#15151B" opacity="0.9" transform="rotate(-14 26 52)" />
+      <ellipse cx="174" cy="52" rx="13" ry="6" fill="#15151B" opacity="0.9" transform="rotate(14 174 52)" />
+
+      {/* 缸體上的一道裂痕 */}
+      <path d="M112,88 L118,102 L112,112 L120,126" stroke="#15151B" strokeWidth="2.5" fill="none" opacity="0.6" strokeLinecap="round" />
+
+      {/* 缸內的菸灰堆 */}
+      <ellipse cx="100" cy="60" rx="48" ry="16" fill="#4A4A52" opacity="0.75" />
+      <ellipse cx="84" cy="58" rx="18" ry="7" fill="#6E6E78" opacity="0.55" />
+      <ellipse cx="120" cy="63" rx="15" ry="6" fill="#5C5C66" opacity="0.5" />
+
+      {/* 缸內的菸屁股們 */}
+      {/* 中間偏左，斜插在灰裡 */}
+      <g transform="rotate(-24 92 54)">
+        <rect x="74" y="48" width="30" height="11" rx="5.5" fill="#F2EFE6" />
+        <rect x="96" y="48" width="14" height="11" rx="5.5" fill="#D9A25A" />
+      </g>
+      {/* 右邊那支綠色的 */}
+      <g transform="rotate(64 132 46)">
+        <rect x="116" y="40" width="26" height="10" rx="5" fill="#93A87E" />
+        <rect x="136" y="40" width="12" height="10" rx="5" fill="#C9A96B" />
+      </g>
+      {/* 右下角一支橫的 */}
+      <g transform="rotate(12 128 68)">
+        <rect x="112" y="63" width="26" height="10" rx="5" fill="#EDE9DE" />
+        <rect x="132" y="63" width="13" height="10" rx="5" fill="#D9A25A" />
+      </g>
+      {/* 左下角露出濾嘴 */}
+      <g transform="rotate(-8 74 68)">
+        <rect x="62" y="63" width="16" height="10" rx="5" fill="#D9A25A" />
+      </g>
+
+      {/* 架在左緣凹槽上、還在燒的那一支 */}
+      <g transform="rotate(-14 40 50)">
+        <rect x="2" y="45" width="44" height="11" rx="5.5" fill="#FAF7EF" />
+        <rect x="2" y="45" width="18" height="11" rx="5.5" fill="#D9A25A" />
+        <rect x="44" y="45" width="5" height="11" rx="2.5" fill="#3A3A44" />
+      </g>
+
+      {/* 一縷輕煙 */}
+      <path
+        className="ashtray-smoke"
+        d="M96,40 C88,24 104,16 98,2 C94,-12 102,-26 108,-40"
+        stroke="#B9B9C4"
+        strokeWidth="3"
+        fill="none"
+        strokeLinecap="round"
+        opacity="0.5"
+      />
+      <path
+        className="ashtray-smoke-2"
+        d="M108,42 C116,28 104,16 112,0 C116,-10 112,-20 116,-30"
+        stroke="#B9B9C4"
+        strokeWidth="2.5"
+        fill="none"
+        strokeLinecap="round"
+        opacity="0.32"
+      />
+
+      <style jsx>{`
+        .ashtray-smoke {
+          animation: smoke-drift 4s ease-in-out infinite;
+        }
+        .ashtray-smoke-2 {
+          animation: smoke-drift 4s ease-in-out infinite 1.2s;
+        }
+        @keyframes smoke-drift {
+          0%, 100% { opacity: 0.18; transform: translateX(0) scaleY(1); }
+          50% { opacity: 0.5; transform: translateX(4px) scaleY(1.08); }
+        }
+      `}</style>
+    </svg>
+  );
+}
 
 interface GroundStick {
   id: number;
   x: number; // 在遊戲區內的水平位置（百分比）
   y: number; // 在遊戲區內的垂直位置（百分比）
-  collecting: boolean; // 是否正在飛向桶子的動畫中
+  rotate: number; // 躺在地上的傾斜角度，讓每根菸蒂看起來方向不同
+  collecting: boolean; // 是否正在飛向菸灰缸的動畫中
 }
 
 function randomGroundStick(): GroundStick {
   return {
     id: Date.now() + Math.random(),
     x: 10 + Math.random() * 78, // 10% ~ 88%
-    y: 8 + Math.random() * 55, // 8% ~ 63%，留空間給下面的桶子
+    y: 8 + Math.random() * 55, // 8% ~ 63%，留空間給下面的菸灰缸
+    rotate: Math.random() * 360,
     collecting: false,
   };
 }
@@ -1471,7 +1621,7 @@ function GoodKidGameScreen({
     setSticks((prev) => prev.map((s) => (s.id === id ? { ...s, collecting: true } : s)));
     onEarnCoin(GOOD_KID_COIN_PER_STICK);
     setCollectedThisRound((c) => c + 1);
-    // 飛進桶子的動畫播完後，把這隻換成新的一隻（呼吸棒無限生成，不會撿完）
+    // 飛進菸灰缸的動畫播完後，把這隻換成新的一隻（呼吸棒無限生成，不會撿完）
     setTimeout(() => {
       setSticks((prev) => [...prev.filter((s) => s.id !== id), randomGroundStick()]);
     }, 320);
@@ -1499,7 +1649,7 @@ function GoodKidGameScreen({
         </div>
       </div>
 
-      {/* 遊戲區：地上散落著呼吸棒，點了就會飛進畫面下方的桶子 */}
+      {/* 遊戲區：地上散落著呼吸棒，點了就會飛進畫面下方的菸灰缸 */}
       <div
         style={{
           position: 'relative',
@@ -1526,18 +1676,18 @@ function GoodKidGameScreen({
               opacity: s.collecting ? 0 : 1,
               background: 'none',
               border: 'none',
-              fontSize: 34,
               cursor: s.collecting ? 'default' : 'pointer',
               padding: 0,
+              lineHeight: 0,
             }}
           >
-            🪄
+            <CigaretteButtIcon size={46} rotate={s.rotate} />
           </button>
         ))}
 
-        {/* 桶子：固定在遊戲區下方置中 */}
-        <div style={{ position: 'absolute', left: '50%', bottom: 8, transform: 'translateX(-50%)', fontSize: 48, pointerEvents: 'none' }}>
-          🪣
+        {/* 菸灰缸：固定在遊戲區下方置中 */}
+        <div style={{ position: 'absolute', left: '50%', bottom: 8, transform: 'translateX(-50%)', pointerEvents: 'none' }}>
+          <AshtrayIcon size={110} />
         </div>
       </div>
     </div>
